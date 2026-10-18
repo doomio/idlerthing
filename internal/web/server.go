@@ -85,6 +85,11 @@ type Server struct {
 	pmSyncMu  sync.Mutex
 	pmSyncing bool
 
+	// bootstrapFile is the path holding the generated first-run admin
+	// password (see main.go's seedAdmin). It is deleted as soon as anyone
+	// signs in successfully, so the credential stops sitting on disk.
+	bootstrapFile string
+
 	// AGPL §13 texts, injected from package main (go:embed cannot reach the
 	// repo root from here) — see legal.go.
 	license    []byte
@@ -124,6 +129,13 @@ func New(db *sql.DB) (*Server, error) {
 // SetSecret overrides the yabs ingest HMAC key.
 func (s *Server) SetSecret(secret []byte) {
 	s.secret = secret
+}
+
+// SetBootstrapPasswordFile points the login path at the file holding the
+// generated first-run admin password; it is removed on the first successful
+// sign-in. Empty (the default) disables the cleanup.
+func (s *Server) SetBootstrapPasswordFile(path string) {
+	s.bootstrapFile = path
 }
 
 // SetBehindTLSProxy marks the app as behind an HTTPS-terminating proxy.

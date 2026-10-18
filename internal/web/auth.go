@@ -26,6 +26,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -182,12 +183,34 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	// signed in" from an attack in the same stream; the fail2ban filter
 	// ignoreregex excludes it.
 	slog.Info("login: authenticated", "from", ip, "user", email)
+	s.removeBootstrapPassword()
 	// Lazy cleanup of expired sessions and past-window yabs capabilities.
 	s.db.ExecContext(r.Context(), "DELETE FROM sessions WHERE expires_at < ?",
 		time.Now().UTC().Format(time.RFC3339))
 	(&model.YABSStore{DB: s.db}).PruneCaps(r.Context())
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// removeBootstrapPassword deletes the file that carried the generated first-run
+// admin password, now that somebody has demonstrably signed in with it. A later
+// login finds the file gone and stays quiet; a failed delete is logged but never
+// breaks the sign-in that just succeeded. The path is set once at startup and
+// only read here, so concurrent logins cannot race on it.
+func (s *Server) removeBootstrapPassword() {
+	if s.bootstrapFile == "" {
+		return
+	}
+	err := os.Remove(s.bootstrapFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		slog.Warn("could not remove the first-run admin password file",
+			"path", s.bootstrapFile, "err", err)
+		return
+	}
+	slog.Info("removed the first-run admin password file", "path", s.bootstrapFile)
 }
 
 // handleLogout deletes the session and clears the cookie.

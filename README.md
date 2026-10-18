@@ -51,10 +51,13 @@ make build
 # open http://127.0.0.1:8080 — log in as admin@localhost
 ```
 
-On first run an admin user is created with a generated password, printed to
-stderr **once** (look for `First run: admin password is ...`). To choose the
-password instead, set `IDLER_ADMIN_PASSWORD` (min 8 chars) before the first
-start.
+On first run an admin user is created with a generated password, written to
+`<IDLER_DB>.admin-password` at mode 0600; stderr names the file **once** (look
+for `First run: the admin password is in ...`). Read it, sign in as
+`admin@localhost`, and the file is deleted automatically. The password never
+goes to the log stream, because a journal entry is retained, group-readable,
+and often forwarded long after you need the credential. To choose the password
+instead, set `IDLER_ADMIN_PASSWORD` (min 8 chars) before the first start.
 
 ## systemd
 
@@ -69,12 +72,18 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now idlerthing
 ```
 
-The env file stays empty unless you want to set variables explicitly. On
-first start a generated admin password is printed once — retrieve it with:
+The env file stays empty unless you want to set variables explicitly. On first
+start the generated admin password is written next to the database at 0600 and
+the journal names the file, never the secret:
 
 ```sh
 sudo journalctl -u idlerthing | grep 'admin password'
+sudo cat /var/lib/idlerthing/data/idlerthing.admin-password
 ```
+
+The first successful login deletes it, so read it before you sign in. If the
+file is already gone, `idlerthing passwd` sets a new one (stop the service
+first, and point `IDLER_DB` at the real database — see [CLI](#cli-commands)).
 
 The database lands in `/var/lib/idlerthing/data/` (default `IDLER_DB` is
 relative to the unit's `WorkingDirectory`). See the comments in the unit file

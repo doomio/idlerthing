@@ -286,7 +286,8 @@ func run() error {
 		return fmt.Errorf("load secret: %w", err)
 	}
 
-	if err := seedAdmin(database, cfg.AdminPassword); err != nil {
+	bootstrapFile, err := seedAdmin(database, cfg.AdminPassword, cfg.DBPath)
+	if err != nil {
 		return fmt.Errorf("seed admin: %w", err)
 	}
 	warnDenylistedPassword(database)
@@ -296,6 +297,7 @@ func run() error {
 		return fmt.Errorf("init web: %w", err)
 	}
 	webServer.SetSecret(secret)
+	webServer.SetBootstrapPasswordFile(bootstrapFile)
 	webServer.SetBehindTLSProxy(cfg.BehindTLSProxy)
 	webServer.SetAllowHTTPIngest(cfg.AllowHTTPIngest)
 	webServer.SetBaseURL(cfg.BaseURL)
@@ -435,14 +437,15 @@ func warnDenylistedPassword(db *sql.DB) {
 
 // seedAdmin creates the initial admin user when the users table is empty.
 // The password comes from cfg password if set, otherwise a random one is
-// generated and printed to stderr once.
-func seedAdmin(db *sql.DB, password string) error {
+// generated and written to dbPath+".admin-password" at 0600; the returned path
+// is handed to the web layer, which deletes the file once somebody signs in.
+func seedAdmin(db *sql.DB, password, dbPath string) (string, error) {
 	var count int
 	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
-		return err
+		return "", err
 	}
 	if count > 0 {
-		return nil
+		return "", nil
 	}
 
 	generated := false
@@ -450,32 +453,77 @@ func seedAdmin(db *sql.DB, password string) error {
 		var err error
 		password, err = randomPassword(16)
 		if err != nil {
-			return err
+			return "", err
 		}
 		generated = true
 	} else if len(password) < 8 || len(password) > 72 {
 		// Same policy as the settings UI — never silently seed a weak admin,
 		// and never let bcrypt silently truncate a >72-byte password.
-		return fmt.Errorf("IDLER_ADMIN_PASSWORD must be 8–72 bytes")
+		return "", fmt.Errorf("IDLER_ADMIN_PASSWORD must be 8–72 bytes")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if _, err := db.Exec(
 		"INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
 		"admin", "admin@localhost", string(hash),
 	); err != nil {
-		return err
+		return "", err
 	}
 
-	if generated {
-		fmt.Fprintf(os.Stderr, "First run: admin password is %s\n", password)
+	if !generated {
+		slog.Info("created admin user", "email", "admin@localhost")
+		return "", nil
 	}
-	slog.Info("created admin user", "email", "admin@localhost")
-	return nil
+	path, err := writeBootstrapPassword(dbPath, password)
+	if err != nil {
+		// The admin row is already committed, so this install needs a password
+		// reset — but printing the plaintext instead would park a live
+		// credential in the journal, which retention, the systemd-journal
+		// group, and any log forwarder all keep far longer than this file.
+		return "", fmt.Errorf("%w — then run `idlerthing passwd` to set the admin password", err)
+	}
+	fmt.Fprintf(os.Stderr,
+		"First run: the admin password is in %s — read it, sign in, and the file is removed automatically.\n", path)
+	slog.Info("created admin user", "email", "admin@localhost", "bootstrap_password_file", path)
+	return path, nil
+}
+
+// writeBootstrapPassword stores a generated admin password next to the DB at
+// 0600 and returns its path, following the same discipline as loadSecret.
+func writeBootstrapPassword(dbPath, password string) (string, error) {
+	path := dbPath + ".admin-password"
+	// O_EXCL so a leftover file is never silently truncated over — the
+	// operator deletes it to deliberately regenerate.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("create password file: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			os.Remove(path)
+		}
+	}()
+	if _, err := f.WriteString(password + "\n"); err != nil {
+		f.Close()
+		return "", fmt.Errorf("write password file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("write password file: %w", err)
+	}
+	// The umask can widen O_CREATE's mode, so set it and verify.
+	if err := os.Chmod(path, 0o600); err != nil {
+		return "", fmt.Errorf("chmod password file: %w", err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		return "", fmt.Errorf("password file %s must be 0600", path)
+	}
+	cleanup = false
+	return path, nil
 }
 
 // randomPassword returns a random URL-safe password of n characters.
