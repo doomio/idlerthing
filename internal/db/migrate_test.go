@@ -520,3 +520,88 @@ func latestMigration(t *testing.T) int {
 	}
 	return pending[len(pending)-1].version
 }
+
+// Migrate must leave a restorable copy of the database behind before it runs a
+// data-rewriting migration: 0007 deletes rows, and an upgrade that crashes or
+// misjudges an orphan cleanup otherwise has no way back.
+func TestMigrateSnapshotBeforeUpgrade(t *testing.T) {
+	path := openTemp(t)
+	database, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	migrateTo(t, database, 6)
+	if _, err := database.Exec("INSERT INTO providers (name) VALUES ('snapshot-probe')"); err != nil {
+		t.Fatalf("seed provider: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	database, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer database.Close()
+	applied, err := Migrate(database)
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if len(applied) == 0 {
+		t.Fatal("test needs pending migrations")
+	}
+
+	snapshot := path + ".pre-0007.sqlite"
+	fi, err := os.Stat(snapshot)
+	if err != nil {
+		t.Fatalf("snapshot missing: %v", err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Errorf("snapshot mode = %o, want 600", perm)
+	}
+
+	// The snapshot has to be the database as it was BEFORE the upgrade, not a
+	// copy of the migrated one.
+	old, err := Open(snapshot)
+	if err != nil {
+		t.Fatalf("open snapshot: %v", err)
+	}
+	defer old.Close()
+	var version int
+	if err := old.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("read snapshot user_version: %v", err)
+	}
+	if version != 6 {
+		t.Errorf("snapshot user_version = %d, want 6", version)
+	}
+	var n int
+	if err := old.QueryRow("SELECT COUNT(*) FROM providers WHERE name = 'snapshot-probe'").Scan(&n); err != nil {
+		t.Fatalf("query snapshot: %v", err)
+	}
+	if n != 1 {
+		t.Error("snapshot does not contain the pre-upgrade row")
+	}
+}
+
+// A first-run database is a zero-byte file; snapshotting it would litter the
+// data directory with a copy of nothing.
+func TestMigrateNoSnapshotForFreshDB(t *testing.T) {
+	path := openTemp(t)
+	database, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer database.Close()
+	if _, err := Migrate(database); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".pre-") {
+			t.Fatalf("unexpected snapshot %q for a fresh database", e.Name())
+		}
+	}
+}
