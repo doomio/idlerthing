@@ -182,12 +182,12 @@ func (s *Server) fleetRows(r *http.Request, providerID int64, services []model.P
 		if !pulsedmedia.IsActive(svc.Status) && !isCancelledRequest(r) {
 			continue
 		}
-		risk, _ := pricing.MonthlyUSD(&model.Pricing{
+		monthlyUSD, _ := pricing.MonthlyUSDRaw(&model.Pricing{
 			Currency: currency.String,
 			Price:    price.Float64,
 			Term:     int(term.Int64),
 		}, rates)
-		out = append(out, buildFleetBox(hostname, svc, diskMB, due.String, risk))
+		out = append(out, buildFleetBox(hostname, svc, diskMB, due.String, monthlyUSD))
 	}
 	return out, rows.Err()
 }

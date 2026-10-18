@@ -144,6 +144,27 @@ func TestFleetUsesEditedInventoryQuota(t *testing.T) {
 	}
 }
 
+func TestFleetRowsKeepRawMonthlyAmount(t *testing.T) {
+	_, database, srv := newTestServerFull(t)
+	provider := fleetFixtureRates(t, database, srv)
+	if _, err := database.Exec(`UPDATE pricings SET currency = 'USD', price = 0.005, term = ?
+		WHERE service_type = ? AND service_id IN (SELECT id FROM seedboxes WHERE provider_id = ? AND pm_service_id = 101)`,
+		model.TermMonthly, model.ServiceSeedbox, provider); err != nil {
+		t.Fatal(err)
+	}
+	services, err := (&model.PMStore{DB: database}).List(t.Context(), provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := srv.fleetRows(httptest.NewRequest(http.MethodGet, "/seedboxes/fleet", nil), provider, services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].MonthlyUSD != 0.005 || fleetTiles(rows).MonthlyUSD != 0.005 {
+		t.Fatalf("fleet rounded before summing: %+v", rows)
+	}
+}
+
 func TestFleetMonthlyTotalUsesUnroundedAmounts(t *testing.T) {
 	boxes := []fleetBox{
 		{Monthly: "$0.01", MonthlyUSD: 0.005},
