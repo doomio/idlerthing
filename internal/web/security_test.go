@@ -176,6 +176,8 @@ func TestLoginEmailLimiter(t *testing.T) {
 	}
 }
 
+// TestRateLimiterPrunesStaleKeys verifies the sweep (triggered past
+// sweepThreshold) drops keys whose attempts have all aged out of the window.
 func TestRateLimiterPrunesStaleKeys(t *testing.T) {
 	rl := newRateLimiter(5, 20*time.Millisecond)
 	// Sweep only kicks in past the threshold.
@@ -189,6 +191,8 @@ func TestRateLimiterPrunesStaleKeys(t *testing.T) {
 	}
 }
 
+// TestRateLimiterKeyCap verifies a new key is denied once the limiter holds
+// maxLimiterKeys distinct keys, while existing keys keep working.
 func TestRateLimiterKeyCap(t *testing.T) {
 	rl := newRateLimiter(5, time.Minute)
 	for i := 0; i < maxLimiterKeys; i++ {

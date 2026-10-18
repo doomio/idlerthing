@@ -50,6 +50,8 @@ func warnf(warnings *[]string, format string, args ...any) {
 	*warnings = append(*warnings, diagnosticText(fmt.Sprintf(format, args...), maxWarningBytes))
 }
 
+// diagnosticText truncates s to at most limit bytes, appending "..." and
+// backing up to a UTF-8 rune boundary so the result is never split mid-rune.
 func diagnosticText(s string, limit int) string {
 	if len(s) <= limit {
 		return s

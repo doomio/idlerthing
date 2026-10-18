@@ -25,6 +25,10 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// TestSessionIssuanceRejectsResetCredential reproduces the race between
+// password verification and a concurrent reset: createSession must refuse to
+// issue a session (and set no cookie) once the verified hash is stale, while
+// a session created against the current hash still succeeds.
 func TestSessionIssuanceRejectsResetCredential(t *testing.T) {
 	_, database, srv := newTestServerFull(t)
 	var id int

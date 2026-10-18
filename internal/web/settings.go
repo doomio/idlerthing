@@ -307,6 +307,7 @@ func validCurrency(code string) string {
 	return "USD"
 }
 
+// boolToIntWeb converts a bool to the 0/1 ints the settings columns store.
 func boolToIntWeb(b bool) int {
 	if b {
 		return 1

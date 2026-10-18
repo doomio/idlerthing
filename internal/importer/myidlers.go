@@ -400,6 +400,8 @@ type csvCells struct {
 	header map[string]int
 }
 
+// cell returns the trimmed value of column name in row ("" when the column
+// is absent from the header or the row is short).
 func (c *csvCells) cell(row []string, name string) string {
 	if i, ok := c.header[name]; ok && i < len(row) {
 		return strings.TrimSpace(row[i])
@@ -407,6 +409,7 @@ func (c *csvCells) cell(row []string, name string) string {
 	return ""
 }
 
+// csvInt parses a CSV cell as an int64 (nil when blank or unparseable).
 func csvInt(v string) *int64 {
 	if v == "" {
 		return nil
@@ -418,6 +421,7 @@ func csvInt(v string) *int64 {
 	return &n
 }
 
+// csvFloat parses a CSV cell as a float64 (nil when blank or unparseable).
 func csvFloat(v string) *float64 {
 	if v == "" {
 		return nil
@@ -429,6 +433,7 @@ func csvFloat(v string) *float64 {
 	return &f
 }
 
+// csvBool reports whether the CSV cell is the literal "1".
 func csvBool(v string) bool { return v == "1" }
 
 // parseCSVRow normalizes one CSV data row (line is the 1-based file line).
@@ -585,6 +590,7 @@ func normDate(s string) (string, bool) {
 	return t.Format(time.DateOnly), true
 }
 
+// intBool converts an optional JSON 0/1 int to a bool (false when nil or 0).
 func intBool(v *int) bool { return v != nil && *v != 0 }
 
 // maxImportMB is the plausibility ceiling for float→MB conversions — the
@@ -650,6 +656,8 @@ func diskToMB(size float64, unit string) int64 {
 	return mb
 }
 
+// diskMedia normalizes a disk media string to one of SSD/HDD/NVMe, defaulting
+// to SSD for anything else.
 func diskMedia(media string) string {
 	switch strings.ToUpper(media) {
 	case "HDD":
@@ -669,6 +677,8 @@ func mapNetworkType(v *string) string {
 	return mapNetworkTypeStr(*v)
 }
 
+// mapNetworkTypeStr maps fork variants onto our network_type set; unknown
+// free text passes through unchanged.
 func mapNetworkTypeStr(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" {

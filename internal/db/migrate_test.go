@@ -34,11 +34,14 @@ var expectedTables = []string{
 	"users", "sessions", "user_prefs",
 }
 
+// openTemp returns a fresh, non-existent database path inside a temp dir.
 func openTemp(t *testing.T) string {
 	t.Helper()
 	return filepath.Join(t.TempDir(), "test.db")
 }
 
+// TestMigrateFreshDB verifies Migrate applies every embedded migration to a
+// brand-new database and leaves it with the expected tables and user_version.
 func TestMigrateFreshDB(t *testing.T) {
 	db, err := Open(openTemp(t))
 	if err != nil {
@@ -73,6 +76,8 @@ func TestMigrateFreshDB(t *testing.T) {
 	}
 }
 
+// TestMigrateIdempotent verifies a second Migrate call on an already
+// up-to-date database is a no-op.
 func TestMigrateIdempotent(t *testing.T) {
 	db, err := Open(openTemp(t))
 	if err != nil {
@@ -100,6 +105,8 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 }
 
+// TestSettingsSeeded verifies the settings row (id=1) is seeded with the
+// expected defaults after migrating a fresh database.
 func TestSettingsSeeded(t *testing.T) {
 	db, err := Open(openTemp(t))
 	if err != nil {

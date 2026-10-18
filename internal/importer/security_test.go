@@ -26,6 +26,9 @@ import (
 	"unicode/utf8"
 )
 
+// assertWarningBudget verifies warnings is exactly at the maxWarnings cap,
+// every entry is within maxWarningBytes and valid UTF-8, the total bytes stay
+// within the overall budget, and the final entry is the suppression notice.
 func assertWarningBudget(t *testing.T, warnings []string) {
 	t.Helper()
 	if len(warnings) != maxWarnings {
@@ -46,6 +49,9 @@ func assertWarningBudget(t *testing.T, warnings []string) {
 	}
 }
 
+// TestMyJSONWarningBudget verifies a my-idlers JSON import with far more
+// invalid IPs than maxWarnings stays within the diagnostic budget end to end
+// (parse warnings and the subsequent ImportMyIdlers warnings).
 func TestMyJSONWarningBudget(t *testing.T) {
 	ips := make([]map[string]string, maxWarnings+20)
 	for i := range ips {
@@ -72,6 +78,8 @@ func TestMyJSONWarningBudget(t *testing.T) {
 	assertWarningBudget(t, summary.Warnings)
 }
 
+// TestNativeWarningBudget verifies a native export with far more
+// out-of-range disk entries than maxWarnings stays within the diagnostic budget.
 func TestNativeWarningBudget(t *testing.T) {
 	disks := make([]any, maxWarnings+20)
 	for i := range disks {
@@ -93,6 +101,9 @@ func TestNativeWarningBudget(t *testing.T) {
 	assertWarningBudget(t, summary.Warnings)
 }
 
+// TestImportHostnameLimits verifies hostnames beyond maxImportHostnameBytes
+// are rejected (JSON/CSV parsing) or skipped with a warning (native import),
+// across all three import formats.
 func TestImportHostnameLimits(t *testing.T) {
 	host := strings.Repeat("h", maxImportHostnameBytes+1)
 	data, err := json.Marshal([]any{map[string]any{"hostname": host}})
@@ -126,6 +137,8 @@ func TestImportHostnameLimits(t *testing.T) {
 	}
 }
 
+// TestWarningFormattingStopsAtBudget verifies warnf stops formatting (and
+// never calls Error on an argument) once the warning budget is exhausted.
 func TestWarningFormattingStopsAtBudget(t *testing.T) {
 	var warnings []string
 	text := strings.Repeat("界", 100000)
@@ -137,6 +150,9 @@ func TestWarningFormattingStopsAtBudget(t *testing.T) {
 	warnf(&warnings, "%v", forbiddenDiagnostic{t})
 }
 
+// forbiddenDiagnostic fails the test if its Error method is ever called,
+// catching a warnf call that formats arguments after the budget is exhausted.
 type forbiddenDiagnostic struct{ t *testing.T }
 
+// Error fails the test: it must never be called once the warning budget is exhausted.
 func (d forbiddenDiagnostic) Error() string { d.t.Fatal("formatted after budget exhausted"); return "" }

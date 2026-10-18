@@ -170,6 +170,9 @@ type importer struct {
 	seenIPs map[string]bool
 }
 
+// run restores one decoded export document into imp.tx in dependency order:
+// catalogs first, then services (with inlined relations), then the
+// remaining top-level relations.
 func (imp *importer) run(ctx context.Context, doc map[string]any) error {
 	imp.catMaps = map[string]map[int64]int64{"labels": {}}
 	imp.ipMaps = map[int64]int64{}
@@ -500,21 +503,25 @@ func (imp *importer) requireName(m map[string]any, key, what string) bool {
 
 // ---------- decode helpers ----------
 
+// arr returns the array-valued field key of doc (nil when absent or not an array).
 func arr(doc map[string]any, key string) []any {
 	v, _ := doc[key].([]any)
 	return v
 }
 
+// mget returns the object-valued field key of m (nil when absent or not an object).
 func mget(m map[string]any, key string) map[string]any {
 	v, _ := m[key].(map[string]any)
 	return v
 }
 
+// sget returns the string-valued field key of m ("" when absent or not a string).
 func sget(m map[string]any, key string) string {
 	v, _ := m[key].(string)
 	return v
 }
 
+// sgetN returns the string-valued field key of m as a NullString (invalid when blank).
 func sgetN(m map[string]any, key string) sql.NullString {
 	v := sget(m, key)
 	if v == "" {
@@ -523,6 +530,8 @@ func sgetN(m map[string]any, key string) sql.NullString {
 	return sql.NullString{String: v, Valid: true}
 }
 
+// nget returns the numeric field key of m as a NullInt64 (invalid when
+// absent, not a number, or outside the safe int64 range).
 func nget(m map[string]any, key string) sql.NullInt64 {
 	v, ok := m[key].(float64)
 	if !ok {
@@ -536,16 +545,19 @@ func nget(m map[string]any, key string) sql.NullInt64 {
 	return sql.NullInt64{Int64: int64(v), Valid: true}
 }
 
+// bget returns the bool-valued field key of m (false when absent or not a bool).
 func bget(m map[string]any, key string) bool {
 	v, _ := m[key].(bool)
 	return v
 }
 
+// fget returns the numeric field key of m as a float64 (0 when absent or not a number).
 func fget(m map[string]any, key string) float64 {
 	v, _ := m[key].(float64)
 	return v
 }
 
+// bint converts a bool to the 0/1 ints the schema stores booleans as.
 func bint(b bool) int {
 	if b {
 		return 1
@@ -701,6 +713,7 @@ func (imp *importer) boundedInt(v sql.NullInt64, max int64, field, host string) 
 
 // ---------- servers ----------
 
+// servers imports the top-level "servers" array, one {"server": ...} item at a time.
 func (imp *importer) servers(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "servers") {
 		it, _ := item.(map[string]any)
@@ -893,6 +906,7 @@ type hostingSpec struct {
 	count       *int
 }
 
+// hosting imports one shared/reseller hosting array per spec, with inlined pricing.
 func (imp *importer) hosting(ctx context.Context, doc map[string]any, spec hostingSpec) error {
 	for _, item := range arr(doc, spec.docKey) {
 		it, _ := item.(map[string]any)
@@ -944,6 +958,7 @@ func (imp *importer) hosting(ctx context.Context, doc map[string]any, spec hosti
 
 // ---------- seedboxes ----------
 
+// seedboxes imports the top-level "seedboxes" array, with inlined pricing.
 func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "seedboxes") {
 		it, _ := item.(map[string]any)
@@ -986,6 +1001,7 @@ func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 
 // ---------- domains ----------
 
+// domains imports the top-level "domains" array, with inlined pricing.
 func (imp *importer) domains(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "domains") {
 		it, _ := item.(map[string]any)
@@ -1022,6 +1038,7 @@ func (imp *importer) domains(ctx context.Context, doc map[string]any) error {
 
 // ---------- misc ----------
 
+// misc imports the top-level "misc" array, with inlined pricing.
 func (imp *importer) misc(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "misc") {
 		it, _ := item.(map[string]any)
@@ -1055,6 +1072,7 @@ func (imp *importer) misc(ctx context.Context, doc map[string]any) error {
 
 // ---------- labels / ips / dns / notes ----------
 
+// labels get-or-creates the top-level "labels" catalog and builds the old→new id map.
 func (imp *importer) labels(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "labels") {
 		it, _ := item.(map[string]any)
@@ -1106,6 +1124,8 @@ func (imp *importer) ips(ctx context.Context, doc map[string]any) error {
 	return nil
 }
 
+// dns imports the top-level "dns" array, remapping each parent reference
+// through the matching service id map.
 func (imp *importer) dns(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "dns") {
 		it, _ := item.(map[string]any)
@@ -1161,6 +1181,8 @@ func (imp *importer) dns(ctx context.Context, doc map[string]any) error {
 	return nil
 }
 
+// notes imports the top-level "notes" array, remapped through either the ip
+// id map (ip-keyed notes) or the matching service id map.
 func (imp *importer) notes(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "notes") {
 		it, _ := item.(map[string]any)

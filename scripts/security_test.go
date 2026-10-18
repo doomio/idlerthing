@@ -24,6 +24,7 @@ import (
 	"testing"
 )
 
+// writeFixture creates content at path, creating parent directories as needed.
 func writeFixture(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -34,6 +35,7 @@ func writeFixture(t *testing.T, path, content string) {
 	}
 }
 
+// fixtureRepo creates a fresh git repository in a temp dir and returns its path.
 func fixtureRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -44,6 +46,7 @@ func fixtureRepo(t *testing.T) string {
 	return dir
 }
 
+// trackFixture stages path in the git repository at dir.
 func trackFixture(t *testing.T, dir, path string) {
 	t.Helper()
 	cmd := exec.Command("git", "-C", dir, "add", "--", path)
@@ -52,6 +55,8 @@ func trackFixture(t *testing.T, dir, path string) {
 	}
 }
 
+// runScript runs script under bash with cwd dir and the given extra
+// environment and arguments, returning its combined output.
 func runScript(t *testing.T, dir, script string, env []string, args ...string) ([]byte, error) {
 	t.Helper()
 	path, err := filepath.Abs(script)
@@ -64,6 +69,9 @@ func runScript(t *testing.T, dir, script string, env []string, args ...string) (
 	return cmd.CombinedOutput()
 }
 
+// TestHeaderRewriteRejectsSymlinks verifies license-headers.sh refuses to
+// rewrite a tracked path that is itself a symlink, or whose parent directory
+// is a symlink, instead of following it and clobbering the linked target.
 func TestHeaderRewriteRejectsSymlinks(t *testing.T) {
 	for _, parent := range []bool{false, true} {
 		for _, check := range []bool{false, true} {
@@ -117,6 +125,10 @@ func TestHeaderRewriteRejectsSymlinks(t *testing.T) {
 	}
 }
 
+// TestHeaderRewritePreservesFilenameBoundaries verifies license-headers.sh
+// correctly rewrites (and then passes --check against) filenames that could
+// otherwise be misparsed, such as a leading-dash name or one containing
+// whitespace/newlines.
 func TestHeaderRewritePreservesFilenameBoundaries(t *testing.T) {
 	dir := fixtureRepo(t)
 	for _, path := range []string{"-asset.js", "internal/web/assets/static/space and\nnewline.css"} {
@@ -131,6 +143,10 @@ func TestHeaderRewritePreservesFilenameBoundaries(t *testing.T) {
 	}
 }
 
+// TestNoticeGeneratorRejectsVendorSymlinks verifies
+// gen-third-party-licenses.sh refuses to run when a vendor license file (or
+// its parent directory) is a symlink, leaving the previous notices file
+// untouched.
 func TestNoticeGeneratorRejectsVendorSymlinks(t *testing.T) {
 	for _, parent := range []bool{false, true} {
 		t.Run(map[bool]string{false: "file", true: "parent"}[parent], func(t *testing.T) {
@@ -163,6 +179,10 @@ func TestNoticeGeneratorRejectsVendorSymlinks(t *testing.T) {
 	}
 }
 
+// noticeFixture builds a fixture git repository plus a fake `go` binary on
+// PATH (so gen-third-party-licenses.sh can run without a real toolchain
+// build), returning the repo dir and the environment variables needed to run
+// the script against it.
 func noticeFixture(t *testing.T) (string, []string) {
 	t.Helper()
 	dir := fixtureRepo(t)
@@ -190,6 +210,10 @@ esac
 	return dir, []string{"PATH=" + tools + string(os.PathListSeparator) + os.Getenv("PATH"), "FIXTURE_GOROOT=" + goroot, "FIXTURE_MODCACHE=" + cache}
 }
 
+// TestNoticeGeneratorPreservesFilenameBoundaries verifies
+// gen-third-party-licenses.sh treats a module-cache path containing
+// grep-option-like text and whitespace as a single ordinary file, rather than
+// letting word-splitting turn it into extra grep arguments.
 func TestNoticeGeneratorPreservesFilenameBoundaries(t *testing.T) {
 	dir, env := noticeFixture(t)
 	var cache string

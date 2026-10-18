@@ -310,11 +310,15 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// sessionFromCtx returns the session loaded by loadSession, or nil when the
+// request is unauthenticated.
 func sessionFromCtx(ctx context.Context) *session {
 	sess, _ := ctx.Value(ctxSession).(*session)
 	return sess
 }
 
+// userFromCtx returns the user loaded by loadSession, or nil when the
+// request is unauthenticated.
 func userFromCtx(ctx context.Context) *user {
 	u, _ := ctx.Value(ctxUser).(*user)
 	return u
@@ -355,6 +359,8 @@ const (
 	maxLimiterKeys = 4096
 )
 
+// newRateLimiter creates a sliding-window limiter allowing at most limit
+// attempts per key within window.
 func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 	return &rateLimiter{hits: make(map[string][]time.Time), limit: limit, window: window}
 }
@@ -419,6 +425,7 @@ type knownIPs struct {
 	max  int
 }
 
+// newKnownIPs creates a knownIPs tracker bounded to at most max entries.
 func newKnownIPs(max int) *knownIPs {
 	return &knownIPs{seen: make(map[string]time.Time), max: max}
 }
