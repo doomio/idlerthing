@@ -106,8 +106,6 @@ func redirectBack(w http.ResponseWriter, r *http.Request, fallback string) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	// codeql[go/unvalidated-url-redirection] deliberate: back is sameOriginPath's
-	// rebuild of a URL parsed with empty scheme and empty host
 	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 

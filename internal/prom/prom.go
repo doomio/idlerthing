@@ -132,7 +132,6 @@ func (c *Client) Query(ctx context.Context, promql string) ([]Sample, error) {
 	// The only source for c.BaseURL is the settings form, which validPromURL
 	// gates to an absolute http(s) URL with a host, and whose redirects
 	// defaultClient pins to that same origin.
-	// codeql[go/request-forgery] deliberate: the endpoint is an admin setting
 	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, transportError(c.BaseURL, err)

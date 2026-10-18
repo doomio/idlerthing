@@ -246,9 +246,11 @@ func (s *Server) logBlocked(ip string) {
 //
 // The condition is deliberate, not an oversight: this app is routinely served
 // over plain HTTP on a LAN, where an unconditional Secure makes the browser
-// discard the cookie and login becomes impossible. CodeQL cannot prove the
-// branch, so each call site carries a go/cookie-secure-not-set suppression
-// comment; the alerts are reviewed whenever a deployment path changes.
+// discard the cookie and login becomes impossible. go/cookie-secure-not-set
+// cannot follow the branch and still reports the flash call sites: a
+// "// codeql[...]" comment filters nothing here (checked against CodeQL
+// 2.27.2 in both documented positions), so those alerts are reviewed as false
+// positives whenever a deployment path changes.
 func (s *Server) cookieSecure(r *http.Request) bool {
 	return r.TLS != nil || s.behindTLSProxy
 }
