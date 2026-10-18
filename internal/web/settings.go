@@ -281,8 +281,11 @@ func (s *Server) popRevealedToken(w http.ResponseWriter, r *http.Request) string
 	if err != nil || cookie.Value == "" {
 		return ""
 	}
+	// Same attributes as the cookie being cleared: a non-Secure clear can be
+	// refused where the original was Secure, leaving the token visible.
 	http.SetCookie(w, &http.Cookie{
-		Name: apiTokenCookieName, Value: "", Path: routeSettings, HttpOnly: true, MaxAge: -1,
+		Name: apiTokenCookieName, Value: "", Path: routeSettings, HttpOnly: true,
+		Secure: s.cookieSecure(r), MaxAge: -1,
 	})
 	return cookie.Value
 }

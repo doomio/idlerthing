@@ -213,6 +213,12 @@ func (s *Server) logBlocked(ip string) {
 // cookieSecure reports whether cookies must carry the Secure attribute:
 // direct TLS, or an HTTPS-terminating proxy in front (IDLER_BEHIND_TLS_PROXY).
 // One rule for session, flash, and login-CSRF cookies.
+//
+// The condition is deliberate, not an oversight: this app is routinely served
+// over plain HTTP on a LAN, where an unconditional Secure makes the browser
+// discard the cookie and login becomes impossible. CodeQL cannot prove the
+// branch, so each call site carries a go/cookie-secure-not-set suppression
+// comment; the alerts are reviewed whenever a deployment path changes.
 func (s *Server) cookieSecure(r *http.Request) bool {
 	return r.TLS != nil || s.behindTLSProxy
 }

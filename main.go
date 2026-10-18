@@ -103,6 +103,11 @@ func runPasswd(args []string) error {
 			return fmt.Errorf("read password from stdin: %w", err)
 		}
 		password = strings.TrimSpace(string(raw))
+	} else if out, oerr := os.Stdout.Stat(); oerr != nil || out.Mode()&os.ModeCharDevice == 0 {
+		// Generation exists for a human reading their own terminal. Anywhere
+		// else — a redirected file, CI, the service's journald stream — printing
+		// the plaintext would persist a long-lived credential, so refuse.
+		return fmt.Errorf("no password on stdin and stdout is not a terminal: pipe the password in instead")
 	} else {
 		password, err = randomPassword(16)
 		if err != nil {
@@ -138,6 +143,10 @@ func runPasswd(args []string) error {
 		return err
 	}
 	if generated {
+		// codeql[go/clear-text-logging] one-time print to the operator's own
+		// terminal: stdout is verified to be a character device above, so the
+		// plaintext never lands in a pipe, a redirected file, or the service's
+		// journald stream.
 		fmt.Printf("generated admin password: %s\n", password)
 	}
 	fmt.Println("admin password updated; all sessions and the API token were revoked")

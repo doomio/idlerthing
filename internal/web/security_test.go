@@ -220,6 +220,16 @@ func TestRedirectBackHardening(t *testing.T) {
 
 	resp = postForm(t, client, ts, "/notes", url.Values{
 		"service_id": {"1"}, "service_type": {"1"},
+		"body": {"x"}, "back": {"//evil.com/paid"},
+	})
+	loc = resp.Header.Get("Location")
+	resp.Body.Close()
+	if loc != "/notes" {
+		t.Fatalf("protocol-relative target should fall back, got %q", loc)
+	}
+
+	resp = postForm(t, client, ts, "/notes", url.Values{
+		"service_id": {"1"}, "service_type": {"1"},
 		"body": {"x"}, "back": {"/servers/1"},
 	})
 	loc = resp.Header.Get("Location")
