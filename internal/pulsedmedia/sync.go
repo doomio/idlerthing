@@ -156,13 +156,20 @@ func reconcile(ctx context.Context, tx *sql.Tx, link model.PMLink, prev model.PM
 	}
 
 	// The durable pricing fields, each merged against what the feed said last
-	// time. An unmappable cycle leaves price and term untouched: a price
-	// stored without its cycle reports a wrong monthly cost.
-	term := TermForCycle(next.BillingCycle)
-	if term == 0 {
-		return nil
+	// time. An unmappable cycle skips ONLY the price: the feed still reports
+	// the quota for a service billed on an odd cycle, and skipping the disk
+	// write too would leave the fleet view saying "no quota reported" forever.
+	if term := TermForCycle(next.BillingCycle); term != 0 {
+		if err := reconcilePricing(ctx, tx, link, prev, next, term); err != nil {
+			return err
+		}
 	}
 
+	return reconcileDisk(ctx, tx, link, prev, hadPrev, next)
+}
+
+// reconcilePricing merges the feed's billing fields into the inventory.
+func reconcilePricing(ctx context.Context, tx *sql.Tx, link model.PMLink, prev, next model.PMService, term int) error {
 	cur, err := currentPricingTx(ctx, tx, link.SeedboxID)
 	if err != nil {
 		return err
@@ -182,25 +189,27 @@ func reconcile(ctx context.Context, tx *sql.Tx, link model.PMLink, prev model.PM
 		currency = "USD" // pricings.currency is NOT NULL; the feed normally sends one
 	}
 
-	if err := model.UpsertPricingTx(ctx, tx, model.ServiceSeedbox, link.SeedboxID, &model.Pricing{
+	return model.UpsertPricingTx(ctx, tx, model.ServiceSeedbox, link.SeedboxID, &model.Pricing{
 		Currency:    currency,
 		Price:       price,
 		Term:        term,
 		NextDueDate: nullString(Effective(cur.nextDue, prev.NextDue, next.NextDue)),
-	}); err != nil {
-		return err
-	}
+	})
+}
 
-	// Disk quota, in the inventory's whole-MB unit. A quota the feed did not
-	// report writes nothing rather than zeroing a size the user set.
+// reconcileDisk merges the feed's quota into the inventory's whole-MB disk
+// size. A quota the feed did not report writes nothing rather than zeroing a
+// size the user set.
+func reconcileDisk(ctx context.Context, tx *sql.Tx, link model.PMLink, prev model.PMService, hadPrev bool, next model.PMService) error {
 	quotaMB := next.DiskQuotaBytes / (1024 * 1024)
 	if quotaMB <= 0 {
 		return nil
 	}
-	currentDisk, previousDisk := "", ""
+	currentDisk := ""
 	if link.DiskAsMB.Valid {
 		currentDisk = strconv.FormatInt(link.DiskAsMB.Int64, 10)
 	}
+	previousDisk := ""
 	if hadPrev && prev.DiskQuotaBytes > 0 {
 		previousDisk = strconv.FormatInt(prev.DiskQuotaBytes/(1024*1024), 10)
 	}

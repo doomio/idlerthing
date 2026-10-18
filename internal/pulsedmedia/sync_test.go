@@ -294,6 +294,30 @@ func TestSyncWritesQuotaAsDisk(t *testing.T) {
 	}
 }
 
+// A cycle idlerthing cannot map must skip the price, not the quota: the feed
+// still reports disk usage for a service billed on an odd cycle, and the fleet
+// view would otherwise show "no quota reported" forever.
+func TestSyncUnknownCycleStillWritesQuota(t *testing.T) {
+	database := syncDB(t)
+	provider := seedProviderKey(t, database, "k")
+	box := seedLinkedSeedbox(t, database, provider, 101, "box1.example.net")
+	putCache(t, database, provider, prevService(provider, 101, "Free Account", "", 0, 0))
+
+	const quota = 9910637035520
+	srv := mockFeed(t, feedJSON(svcJSON(101, "Free Account", `"0"`, "", quota)))
+	if _, err := Sync(context.Background(), database, provider, "k", srv.URL, time.Now()); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	disk, ok := readDisk(t, database, box)
+	if !ok {
+		t.Fatal("an unmappable cycle must still record the quota")
+	}
+	if want := int64(quota / (1024 * 1024)); disk != want {
+		t.Fatalf("disk = %d MB, want %d", disk, want)
+	}
+}
+
 // A quota the feed did not report must not wipe a disk size the human set.
 func TestSyncQuotaZeroWritesNoDisk(t *testing.T) {
 	database := syncDB(t)

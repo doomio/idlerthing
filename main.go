@@ -264,6 +264,7 @@ func run() error {
 	webServer.SetBehindTLSProxy(cfg.BehindTLSProxy)
 	webServer.SetAllowHTTPIngest(cfg.AllowHTTPIngest)
 	webServer.SetBaseURL(cfg.BaseURL)
+	webServer.SetPMAPIURL(cfg.PMAPIURL)
 	webServer.SetLegal(License, ThirdPartyLicenses)
 	webServer.SetVersion(version)
 
