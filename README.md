@@ -133,8 +133,12 @@ renewals, quota and live usage come from the provider instead of being typed
 in by hand.
 
 1. Create a read-only API key in the client area (`?m=pmapi`).
-2. **Providers** → paste it into the PulsedMedia row. The key is write-only:
-   it is stored, never rendered back into the page, and never exported.
+2. **Providers** → choose the provider record for this account and paste the key
+   into its **PulsedMedia API key** field. A provider with a key is included
+   when you press **Sync now**; the provider name is not matched and there is
+   no separate checkbox. Leave the field blank to keep the key, or
+   check **clear** to disable sync. The key is write-only: it is stored, never
+   rendered back into the page, and never exported.
 3. **Seedboxes → Fleet** → **Sync now**.
 
 Every service on the account is cached locally. A seedbox is matched to its

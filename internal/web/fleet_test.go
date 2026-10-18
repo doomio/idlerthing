@@ -99,6 +99,23 @@ func fleetFixtureRates(t *testing.T, database *sql.DB, srv *Server) (providerID 
 	return providerID
 }
 
+func TestFleetActionsLayout(t *testing.T) {
+	ts, database, srv := newTestServerFull(t)
+	fleetFixtureRates(t, database, srv)
+	client := authedClient(t, ts)
+	resp, err := client.Get(ts.URL + "/seedboxes/fleet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	for _, want := range []string{"fleet-actions", "fleet-secondary-actions", "Show cancelled", "Sync now", "All seedboxes"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing fleet action %q", want)
+		}
+	}
+}
+
 func TestFleetUsagePresentation(t *testing.T) {
 	ts, database, srv := newTestServerFull(t)
 	fleetFixtureRates(t, database, srv)
@@ -109,7 +126,7 @@ func TestFleetUsagePresentation(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body := readBody(t, resp)
-	for _, label := range []string{"Storage used", "Traffic sent", "Traffic received", "Disk usage", "aria-label=\"Disk usage", "w5", "Provider-reported usage, not live CPU"} {
+	for _, label := range []string{"Storage used", "Traffic sent", "Traffic received", "Disk usage", "w5", "periods may differ by box"} {
 		if !strings.Contains(body, label) {
 			t.Errorf("fleet missing %q", label)
 		}

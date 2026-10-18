@@ -222,6 +222,25 @@ func TestSyncKeepsHumanEdit(t *testing.T) {
 	}
 }
 
+func TestSyncPreservesEditedBillingTerm(t *testing.T) {
+	database := syncDB(t)
+	provider := seedProviderKey(t, database, "k")
+	box := seedLinkedSeedbox(t, database, provider, 101, "box1.example.net")
+	putCache(t, database, provider, prevService(provider, 101, "Monthly", "2026-01-01", 10, 0))
+	if _, err := database.Exec(`INSERT INTO pricings (service_id, service_type, currency, price, term, next_due_date)
+		VALUES (?, ?, 'EUR', 10, ?, '2026-01-01')`, box, model.ServiceSeedbox, model.TermQuarterly); err != nil {
+		t.Fatal(err)
+	}
+	srv := mockFeed(t, feedJSON(svcJSON(101, "Monthly", `"11"`, "2026-02-01", 0)))
+	if _, err := Sync(context.Background(), database, provider, "k", srv.URL, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	_, term, _, _, _ := readPricing(t, database, box)
+	if term != model.TermQuarterly {
+		t.Fatalf("edited billing term overwritten: %d", term)
+	}
+}
+
 func TestSyncFillsEmptyPriceAndTerm(t *testing.T) {
 	database := syncDB(t)
 	provider := seedProviderKey(t, database, "k")
