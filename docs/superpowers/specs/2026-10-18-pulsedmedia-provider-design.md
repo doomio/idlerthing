@@ -168,13 +168,12 @@ No other package imports `net/http` for this feature.
 
 ### Linking a seedbox to a feed service
 
-On sync, for each seedbox whose provider holds a key and which has no link yet,
-match against that provider's services: exact `permanent_address` or
-`login_url` host, or `domain`, equal to the seedbox `hostname`
-(case-insensitive); else `hostname` containing the service `username`; else the
-provider having exactly one service. A match is stored; unmatched rows stay
-NULL. The seedbox form gains a service dropdown, shown only for providers with
-a key, to link or clear by hand.
+Current behavior (tightened after review): on sync, a seedbox with no link is
+auto-linked only when its hostname uniquely matches the provider service's
+`permanent_address` host or `domain` (case-insensitive). Username substrings
+and a single-service account no longer suffice: either can attach unrelated
+inventory and overwrite billing data. Unmatched rows stay NULL; the seedbox
+form offers a manual service dropdown for providers with a key.
 
 ### Fleet view
 

@@ -93,7 +93,7 @@ func TestMatchByPermanentAddressHost(t *testing.T) {
 	}
 }
 
-func TestMatchByUsernameSubstring(t *testing.T) {
+func TestMatchDoesNotGuessFromUsername(t *testing.T) {
 	database := syncDB(t)
 	provider := seedProviderKey(t, database, "k")
 	box := seedSeedbox(t, database, provider, "exuser.box3.example.net")
@@ -104,13 +104,13 @@ func TestMatchByUsernameSubstring(t *testing.T) {
 	if _, err := Match(context.Background(), database, provider); err != nil {
 		t.Fatalf("Match: %v", err)
 	}
-	if got := readLink(t, database, box); !got.Valid || got.Int64 != 303 {
-		t.Fatalf("link = %+v, want service 303", got)
+	if got := readLink(t, database, box); got.Valid {
+		t.Fatalf("username substring is not proof of ownership: %+v", got)
 	}
 }
 
-// A provider with exactly one service is not a guess: there is only one thing
-// it could be.
+// A provider can carry other services: one feed service does not prove which
+// inventory seedbox it belongs to.
 func TestMatchSingleServiceAccount(t *testing.T) {
 	database := syncDB(t)
 	provider := seedProviderKey(t, database, "k")
@@ -122,13 +122,23 @@ func TestMatchSingleServiceAccount(t *testing.T) {
 	if _, err := Match(context.Background(), database, provider); err != nil {
 		t.Fatalf("Match: %v", err)
 	}
-	if got := readLink(t, database, box); !got.Valid || got.Int64 != 404 {
-		t.Fatalf("link = %+v, want service 404", got)
+	if got := readLink(t, database, box); got.Valid {
+		t.Fatalf("single service is not proof of ownership: %+v", got)
 	}
 }
 
-// Two services and no distinguishing feature: refuse to guess. A wrong link
+// Two services claiming the same hostname are also ambiguous; a wrong link
 // writes another service's renewal date onto this box.
+func TestMatchRefusesConflictingExactHosts(t *testing.T) {
+	services := []model.PMService{
+		{ServiceID: 1, Domain: "box.example.net"},
+		{ServiceID: 2, PermanentAddress: "https://box.example.net/"},
+	}
+	if id, ok := matchService("box.example.net", services); ok || id != 0 {
+		t.Fatalf("ambiguous exact hosts linked to %d", id)
+	}
+}
+
 func TestMatchNoGuessOnAmbiguity(t *testing.T) {
 	database := syncDB(t)
 	provider := seedProviderKey(t, database, "k")

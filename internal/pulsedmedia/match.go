@@ -29,10 +29,9 @@ import (
 // Match links a provider's seedboxes to its cached feed services and returns
 // how many links it made.
 //
-// The cost of a wrong link is a wrong renewal date and price on the user's
-// row, so matching only takes a link it can justify: an exact host, an exact
-// username, or a provider that has exactly one service. Anything else stays
-// unlinked for the user to connect by hand.
+// Matching requires a unique exact host. Heuristics can attach the wrong
+// service and overwrite a seedbox's billing data; unmatched boxes are linked
+// manually in the seedbox form.
 func Match(ctx context.Context, db *sql.DB, providerID int64) (int, error) {
 	services, err := (&model.PMStore{DB: db}).List(ctx, providerID)
 	if err != nil {
@@ -73,39 +72,16 @@ func Match(ctx context.Context, db *sql.DB, providerID int64) (int, error) {
 
 // matchService decides which feed service a seedbox hostname belongs to.
 func matchService(hostname string, services []model.PMService) (int64, bool) {
-	// An exact host is the strongest signal there is.
+	var found int64
 	for _, s := range services {
 		if hostMatch(hostname, s.PermanentAddress) || strings.EqualFold(s.Domain, hostname) {
-			return s.ServiceID, true
-		}
-	}
-
-	// Otherwise the account username usually appears in the hostname
-	// ("user.box.host"). Two hits is ambiguity, not agreement.
-	var found int64
-	hits := 0
-	lowerHost := strings.ToLower(hostname)
-	for _, s := range services {
-		if s.Username == "" {
-			continue
-		}
-		if strings.Contains(lowerHost, strings.ToLower(s.Username)) {
+			if found != 0 && found != s.ServiceID {
+				return 0, false // conflicting exact hosts are ambiguous
+			}
 			found = s.ServiceID
-			hits++
 		}
 	}
-	if hits == 1 {
-		return found, true
-	}
-	if hits > 1 {
-		return 0, false
-	}
-
-	// One service on the account can only be that service.
-	if len(services) == 1 {
-		return services[0].ServiceID, true
-	}
-	return 0, false
+	return found, found != 0
 }
 
 // hostMatch reports whether a permanent address names the given host. The
