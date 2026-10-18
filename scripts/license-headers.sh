@@ -63,16 +63,31 @@ header_for() {
 
 # Tracked, first-party, stampable files.
 files() {
-	git ls-files -- '*.go' '*.js' '*.css' '*.sql' '*.html' \
-		| grep -v '^internal/web/assets/static/htmx.min.js$' \
-		| grep -v '^internal/web/assets/vendor/'
+	git ls-files -z -- '*.go' '*.js' '*.css' '*.sql' '*.html'
 }
 
 missing=()
 stamped=0
-while IFS= read -r f; do
-	[[ -z "$f" ]] && continue
-	if head -20 "$f" | grep -qF "$MARKER"; then continue; fi
+while IFS= read -r -d '' f; do
+	case "$f" in
+	internal/web/assets/static/htmx.min.js | internal/web/assets/vendor/*) continue ;;
+	esac
+	# Check every component before reading: a regular file under a symlinked
+	# directory can leak outside source just as a symlinked file can.
+	path=$f
+	while :; do
+		if [[ -L "$path" ]]; then
+			printf 'ERROR: symlink in source path: %s\n' "$f" >&2
+			exit 1
+		fi
+		[[ "$path" == */* ]] || break
+		path=${path%/*}
+	done
+	if [[ ! -f "$f" ]]; then
+		printf 'ERROR: source is not a regular file: %s\n' "$f" >&2
+		exit 1
+	fi
+	if head -20 -- "$f" | grep -qF "$MARKER"; then continue; fi
 	if [[ "$CHECK" = 1 ]]; then
 		missing+=("$f")
 		continue
@@ -80,8 +95,8 @@ while IFS= read -r f; do
 	hdr=$(header_for "$f") || continue
 	tmp=$(mktemp)
 	printf '%s\n\n' "$hdr" >"$tmp"
-	cat "$f" >>"$tmp"
-	mv "$tmp" "$f"
+	cat -- "$f" >>"$tmp"
+	mv -- "$tmp" "$f"
 	stamped=$((stamped + 1))
 done < <(files)
 

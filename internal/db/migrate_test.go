@@ -34,11 +34,14 @@ var expectedTables = []string{
 	"users", "sessions", "user_prefs",
 }
 
+// openTemp returns a fresh, non-existent database path inside a temp dir.
 func openTemp(t *testing.T) string {
 	t.Helper()
 	return filepath.Join(t.TempDir(), "test.db")
 }
 
+// TestMigrateFreshDB verifies Migrate applies every embedded migration to a
+// brand-new database and leaves it with the expected tables and user_version.
 func TestMigrateFreshDB(t *testing.T) {
 	db, err := Open(openTemp(t))
 	if err != nil {
@@ -73,6 +76,8 @@ func TestMigrateFreshDB(t *testing.T) {
 	}
 }
 
+// TestMigrateIdempotent verifies a second Migrate call on an already
+// up-to-date database is a no-op.
 func TestMigrateIdempotent(t *testing.T) {
 	db, err := Open(openTemp(t))
 	if err != nil {
@@ -100,6 +105,8 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 }
 
+// TestSettingsSeeded verifies the settings row (id=1) is seeded with the
+// expected defaults after migrating a fresh database.
 func TestSettingsSeeded(t *testing.T) {
 	db, err := Open(openTemp(t))
 	if err != nil {
@@ -519,6 +526,57 @@ func latestMigration(t *testing.T) int {
 		t.Fatal("no embedded migrations")
 	}
 	return pending[len(pending)-1].version
+}
+
+func TestMigration0015ImportLookupIndexes(t *testing.T) {
+	database, err := Open(openTemp(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	migrateTo(t, database, 14)
+	for _, tc := range []struct{ table, column, index string }{
+		{"servers", "hostname", "idx_servers_hostname_nocase"},
+		{"providers", "name", "idx_providers_name_nocase"},
+		{"locations", "name", "idx_locations_name_nocase"},
+		{"os", "name", "idx_os_name_nocase"},
+		{"labels", "label", "idx_labels_label_nocase"},
+	} {
+		t.Run(tc.table, func(t *testing.T) {
+			for _, value := range []string{"MiXeD", "mixed"} {
+				if _, err := database.Exec("INSERT INTO "+tc.table+" ("+tc.column+") VALUES (?)", value); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+	if _, err := Migrate(database); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ table, column, index string }{
+		{"servers", "hostname", "idx_servers_hostname_nocase"},
+		{"providers", "name", "idx_providers_name_nocase"},
+		{"locations", "name", "idx_locations_name_nocase"},
+		{"os", "name", "idx_os_name_nocase"},
+		{"labels", "label", "idx_labels_label_nocase"},
+	} {
+		query := "SELECT COUNT(*) FROM " + tc.table + " WHERE " + tc.column + " = ? COLLATE NOCASE"
+		var count int
+		if err := database.QueryRow(query, "MIXED").Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 2 {
+			t.Fatalf("%s lost case variants: %d", tc.table, count)
+		}
+		var id, parent, unused int
+		var detail string
+		if err := database.QueryRow("EXPLAIN QUERY PLAN "+query, "MIXED").Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(detail, "SEARCH") || !strings.Contains(detail, tc.index) {
+			t.Fatalf("%s uses %s", tc.table, detail)
+		}
+	}
 }
 
 // Migrate must leave a restorable copy of the database behind before it runs a
