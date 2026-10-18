@@ -327,13 +327,15 @@ func (s *Server) computeDashboard(r *http.Request) (*dashboardView, error) {
 	return view, nil
 }
 
-// dashSettings reads the settings row relevant to the dashboard.
+// dashSettings is the settings row subset relevant to the dashboard.
 type dashSettings struct {
 	currency      string
 	dueSoon       int
 	recentlyAdded int
 }
 
+// dashSettings reads the settings row relevant to the dashboard, applying
+// defaults when dueSoon/recentlyAdded are unset.
 func (s *Server) dashSettings(r *http.Request) dashSettings {
 	settings := s.memoSettings(r)
 	out := dashSettings{

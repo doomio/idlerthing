@@ -64,6 +64,7 @@ type IPStore struct {
 const ipColumns = `id, service_id, service_type, address, is_ipv4,
 	country, region, city, org, isp, asn, fetched_at, created_at, updated_at`
 
+// scanIP scans one ipColumns row into an IP.
 func scanIP(row interface{ Scan(...any) error }) (*IP, error) {
 	var ip IP
 	var v4 int
@@ -181,6 +182,7 @@ func (s *IPStore) UpdateWhois(ctx context.Context, id int64, w *WhoisData) error
 	return nil
 }
 
+// nullStr converts a string to a NullString (invalid when empty).
 func nullStr(s string) sql.NullString {
 	if s == "" {
 		return sql.NullString{}

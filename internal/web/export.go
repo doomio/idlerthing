@@ -560,6 +560,7 @@ func pricingCSV(p *model.Pricing) []string {
 		model.TermLabel(p.Term), due}
 }
 
+// boolCSV renders a bool as a "0"/"1" CSV cell.
 func boolCSV(b bool) string {
 	if b {
 		return "1"
@@ -575,6 +576,7 @@ func niCSV(n sql.NullInt64) string {
 	return strconv.FormatInt(n.Int64, 10)
 }
 
+// csvServers renders all servers as CSV rows.
 func (s *Server) csvServers(r *http.Request) ([][]string, error) {
 	items, err := s.servers.List(r.Context(), model.ListOptions{Status: "all"})
 	if err != nil {
@@ -594,6 +596,7 @@ func (s *Server) csvServers(r *http.Request) ([][]string, error) {
 	return out, nil
 }
 
+// csvHosting renders all shared or reseller hosting rows (per serviceType) as CSV rows.
 func (s *Server) csvHosting(r *http.Request, serviceType int) ([][]string, error) {
 	var items []model.HostingListItem
 	var err error
@@ -617,6 +620,7 @@ func (s *Server) csvHosting(r *http.Request, serviceType int) ([][]string, error
 	return out, nil
 }
 
+// csvSeedboxes renders all seedboxes as CSV rows.
 func (s *Server) csvSeedboxes(r *http.Request) ([][]string, error) {
 	items, err := (&model.SeedboxStore{DB: s.db}).List(r.Context(), model.ListOptions{Status: "all"})
 	if err != nil {
@@ -635,6 +639,7 @@ func (s *Server) csvSeedboxes(r *http.Request) ([][]string, error) {
 	return out, nil
 }
 
+// csvDomains renders all domains as CSV rows.
 func (s *Server) csvDomains(r *http.Request) ([][]string, error) {
 	items, err := (&model.DomainStore{DB: s.db}).List(r.Context(), model.ListOptions{Status: "all"})
 	if err != nil {
@@ -652,6 +657,7 @@ func (s *Server) csvDomains(r *http.Request) ([][]string, error) {
 	return out, nil
 }
 
+// csvMisc renders all misc services as CSV rows.
 func (s *Server) csvMisc(r *http.Request) ([][]string, error) {
 	items, err := (&model.MiscStore{DB: s.db}).List(r.Context(), model.ListOptions{Status: "all"})
 	if err != nil {

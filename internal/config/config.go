@@ -70,6 +70,7 @@ func envBool(key string) bool {
 	return false
 }
 
+// getEnv returns the env var key's value, or fallback when it is unset or empty.
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

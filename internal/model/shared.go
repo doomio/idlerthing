@@ -62,6 +62,8 @@ func hostingListColumns(typeCol string) string {
 	return prefixedColumns("s", hostingColumns(typeCol))
 }
 
+// scanHosting scans one hostingColumns row into h, with the type column
+// (shared_type or reseller_type) scanned into typeVal.
 func scanHosting(row interface{ Scan(...any) error }, typeVal *sql.NullString, h *SharedHosting) error {
 	var hasIP, active, showPublic, wasPromo int
 	err := row.Scan(&h.ID, &h.MainDomain, typeVal, &h.ProviderID, &h.LocationID,
@@ -86,6 +88,7 @@ type hostingStore struct {
 	serviceType int    // pricings service_type
 }
 
+// create inserts a hosting row plus optional pricing in one transaction.
 func (st *hostingStore) create(ctx context.Context, h *SharedHosting, pricing *Pricing) (int64, error) {
 	tx, err := st.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -116,6 +119,7 @@ func (st *hostingStore) create(ctx context.Context, h *SharedHosting, pricing *P
 	return id, tx.Commit()
 }
 
+// get returns one hosting row with its pricing.
 func (st *hostingStore) get(ctx context.Context, id int64) (*SharedHosting, *Pricing, error) {
 	h := &SharedHosting{}
 	err := scanHosting(QuerierFrom(ctx, st.DB).QueryRowContext(ctx,
@@ -131,6 +135,7 @@ func (st *hostingStore) get(ctx context.Context, id int64) (*SharedHosting, *Pri
 	return h, pricing, nil
 }
 
+// update replaces a hosting row's fields and pricing in one transaction.
 func (st *hostingStore) update(ctx context.Context, h *SharedHosting, pricing *Pricing) error {
 	tx, err := st.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -162,6 +167,7 @@ func (st *hostingStore) update(ctx context.Context, h *SharedHosting, pricing *P
 	return tx.Commit()
 }
 
+// delete removes a hosting row plus its polymorphic children.
 func (st *hostingStore) delete(ctx context.Context, id int64) error {
 	return deleteServiceTx(ctx, st.DB, st.table, st.serviceType, id)
 }
@@ -186,6 +192,7 @@ var hostingSortColumns = map[string]string{
 	"due":      "pr.next_due_date",
 }
 
+// list returns filtered/sorted hosting rows.
 func (st *hostingStore) list(ctx context.Context, opts ListOptions) ([]HostingListItem, error) {
 	var where []string
 	var args []any
@@ -268,6 +275,7 @@ func (st *hostingStore) list(ctx context.Context, opts ListOptions) ([]HostingLi
 	return out, rows.Err()
 }
 
+// statusCounts returns active and inactive row counts for the table.
 func (st *hostingStore) statusCounts(ctx context.Context) (active, inactive int, err error) {
 	err = QuerierFrom(ctx, st.DB).QueryRowContext(ctx,
 		"SELECT COALESCE(SUM(active = 1), 0), COALESCE(SUM(active = 0), 0) FROM "+st.table).
@@ -275,6 +283,7 @@ func (st *hostingStore) statusCounts(ctx context.Context) (active, inactive int,
 	return active, inactive, err
 }
 
+// distinctProviders returns the number of distinct providers used by the table.
 func (st *hostingStore) distinctProviders(ctx context.Context) (int, error) {
 	var n int
 	err := QuerierFrom(ctx, st.DB).QueryRowContext(ctx,
@@ -285,26 +294,40 @@ func (st *hostingStore) distinctProviders(ctx context.Context) (int, error) {
 // SharedStore wraps the DB for shared hosting queries.
 type SharedStore struct{ DB *sql.DB }
 
+// impl returns the hostingStore configured for the shared_hosting table.
 func (s *SharedStore) impl() *hostingStore {
 	return &hostingStore{DB: s.DB, table: "shared_hosting", typeCol: "shared_type", serviceType: ServiceShared}
 }
 
+// Create inserts a shared hosting row plus optional pricing in one transaction.
 func (s *SharedStore) Create(ctx context.Context, h *SharedHosting, p *Pricing) (int64, error) {
 	return s.impl().create(ctx, h, p)
 }
+
+// Get returns one shared hosting row with its pricing.
 func (s *SharedStore) Get(ctx context.Context, id int64) (*SharedHosting, *Pricing, error) {
 	return s.impl().get(ctx, id)
 }
+
+// Update replaces a shared hosting row's fields and pricing in one transaction.
 func (s *SharedStore) Update(ctx context.Context, h *SharedHosting, p *Pricing) error {
 	return s.impl().update(ctx, h, p)
 }
+
+// Delete removes a shared hosting row plus its polymorphic children.
 func (s *SharedStore) Delete(ctx context.Context, id int64) error { return s.impl().delete(ctx, id) }
+
+// List returns filtered/sorted shared hosting rows.
 func (s *SharedStore) List(ctx context.Context, opts ListOptions) ([]HostingListItem, error) {
 	return s.impl().list(ctx, opts)
 }
+
+// StatusCounts returns active and inactive shared hosting counts.
 func (s *SharedStore) StatusCounts(ctx context.Context) (int, int, error) {
 	return s.impl().statusCounts(ctx)
 }
+
+// DistinctProviders returns the number of distinct providers used by shared hosting.
 func (s *SharedStore) DistinctProviders(ctx context.Context) (int, error) {
 	return s.impl().distinctProviders(ctx)
 }

@@ -44,8 +44,11 @@ var pingBinary = resolvePing()
 // pingCandidates are the fixed locations searched before the PATH fallback.
 var pingCandidates = []string{"/bin/ping", "/usr/bin/ping", "/sbin/ping", "/usr/sbin/ping"}
 
+// resolvePing resolves the ping binary from the fixed candidate paths.
 func resolvePing() string { return resolvePingFrom(pingCandidates) }
 
+// resolvePingFrom resolves the ping binary from candidates (regular files
+// only), falling back to a PATH lookup, or "" when none is found.
 func resolvePingFrom(candidates []string) string {
 	for _, p := range candidates {
 		// Regular files only: a directory named "ping" on the search list

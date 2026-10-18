@@ -28,26 +28,40 @@ type ResellerHosting = SharedHosting
 // ResellerStore wraps the DB for reseller hosting queries.
 type ResellerStore struct{ DB *sql.DB }
 
+// impl returns the hostingStore configured for the reseller_hosting table.
 func (s *ResellerStore) impl() *hostingStore {
 	return &hostingStore{DB: s.DB, table: "reseller_hosting", typeCol: "reseller_type", serviceType: ServiceReseller}
 }
 
+// Create inserts a reseller hosting row plus optional pricing in one transaction.
 func (s *ResellerStore) Create(ctx context.Context, h *ResellerHosting, p *Pricing) (int64, error) {
 	return s.impl().create(ctx, h, p)
 }
+
+// Get returns one reseller hosting row with its pricing.
 func (s *ResellerStore) Get(ctx context.Context, id int64) (*ResellerHosting, *Pricing, error) {
 	return s.impl().get(ctx, id)
 }
+
+// Update replaces a reseller hosting row's fields and pricing in one transaction.
 func (s *ResellerStore) Update(ctx context.Context, h *ResellerHosting, p *Pricing) error {
 	return s.impl().update(ctx, h, p)
 }
+
+// Delete removes a reseller hosting row plus its polymorphic children.
 func (s *ResellerStore) Delete(ctx context.Context, id int64) error { return s.impl().delete(ctx, id) }
+
+// List returns filtered/sorted reseller hosting rows.
 func (s *ResellerStore) List(ctx context.Context, opts ListOptions) ([]HostingListItem, error) {
 	return s.impl().list(ctx, opts)
 }
+
+// StatusCounts returns active and inactive reseller hosting counts.
 func (s *ResellerStore) StatusCounts(ctx context.Context) (int, int, error) {
 	return s.impl().statusCounts(ctx)
 }
+
+// DistinctProviders returns the number of distinct providers used by reseller hosting.
 func (s *ResellerStore) DistinctProviders(ctx context.Context) (int, error) {
 	return s.impl().distinctProviders(ctx)
 }

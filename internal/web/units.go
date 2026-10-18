@@ -62,6 +62,8 @@ func bwDisplay(n sql.NullInt64) string {
 	return fmtMB(n.Int64)
 }
 
+// trim2 formats f to at most 2 decimal places, trimming trailing zeros
+// and a trailing decimal point.
 func trim2(f float64) string {
 	s := strconv.FormatFloat(f, 'f', 2, 64)
 	s = strings.TrimRight(s, "0")

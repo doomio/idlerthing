@@ -189,15 +189,10 @@ func reconcilePricing(ctx context.Context, tx *sql.Tx, link model.PMLink, prev, 
 		currency = "USD" // pricings.currency is NOT NULL; the feed normally sends one
 	}
 
-	mergedTerm := term
-	if cur.term != 0 && cur.term != TermForCycle(prev.BillingCycle) {
-		mergedTerm = cur.term // a different term was entered by the user
-	}
-
 	return model.UpsertPricingTx(ctx, tx, model.ServiceSeedbox, link.SeedboxID, &model.Pricing{
 		Currency:    currency,
 		Price:       price,
-		Term:        mergedTerm,
+		Term:        term,
 		NextDueDate: nullString(Effective(cur.nextDue, prev.NextDue, next.NextDue)),
 	})
 }
@@ -234,19 +229,19 @@ type currentPricing struct {
 	currency string
 	price    float64
 	hasPrice bool
-	term     int
 	nextDue  string
 }
 
+// currentPricingTx reads the active pricing row for one seedbox (zero value,
+// no error, when none is set).
 func currentPricingTx(ctx context.Context, tx *sql.Tx, seedboxID int64) (currentPricing, error) {
 	var p currentPricing
 	var currency, due sql.NullString
 	var price sql.NullFloat64
-	var term sql.NullInt64
 	err := tx.QueryRowContext(ctx, `
-		SELECT currency, price, term, next_due_date FROM pricings
+		SELECT currency, price, next_due_date FROM pricings
 		WHERE service_type = ? AND service_id = ? AND active = 1`,
-		model.ServiceSeedbox, seedboxID).Scan(&currency, &price, &term, &due)
+		model.ServiceSeedbox, seedboxID).Scan(&currency, &price, &due)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, nil
 	}
@@ -257,7 +252,6 @@ func currentPricingTx(ctx context.Context, tx *sql.Tx, seedboxID int64) (current
 	p.nextDue = due.String
 	p.price = price.Float64
 	p.hasPrice = price.Valid
-	p.term = int(term.Int64)
 	return p, nil
 }
 
@@ -300,4 +294,5 @@ func usageField[T any](s Service, f func(*Usage) T) T {
 	return f(s.Seedbox.Usage)
 }
 
+// nullString converts a string to a NullString (invalid when empty).
 func nullString(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }
