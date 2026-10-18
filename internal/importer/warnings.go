@@ -18,6 +18,7 @@ package importer
 
 import (
 	"fmt"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -50,9 +51,10 @@ func warnf(warnings *[]string, format string, args ...any) {
 	*warnings = append(*warnings, diagnosticText(fmt.Sprintf(format, args...), maxWarningBytes))
 }
 
-// diagnosticText truncates s to at most limit bytes, appending "..." and
-// backing up to a UTF-8 rune boundary so the result is never split mid-rune.
+// diagnosticText normalizes s to valid UTF-8 and truncates it to limit bytes,
+// appending "..." without splitting a rune.
 func diagnosticText(s string, limit int) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
 	if len(s) <= limit {
 		return s
 	}

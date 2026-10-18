@@ -19,6 +19,7 @@ package web
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -247,6 +248,10 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, u *user)
 		return
 	}
 	if err := s.createSession(w, r, u.ID, string(newHash)); err != nil {
+		if errors.Is(err, errCredentialsChanged) {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
 		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
 		return
 	}

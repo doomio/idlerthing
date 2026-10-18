@@ -102,24 +102,52 @@ func TestNativeWarningBudget(t *testing.T) {
 }
 
 // TestImportHostnameLimits verifies hostnames beyond maxImportHostnameBytes
-// are rejected (JSON/CSV parsing) or skipped with a warning (native import),
-// across all three import formats.
+// are skipped with a warning while valid rows remain importable in all formats.
 func TestImportHostnameLimits(t *testing.T) {
 	host := strings.Repeat("h", maxImportHostnameBytes+1)
-	data, err := json.Marshal([]any{map[string]any{"hostname": host}})
+	data, err := json.Marshal([]any{
+		map[string]any{"hostname": "before.example"},
+		map[string]any{"hostname": host},
+		map[string]any{"hostname": "after.example"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ParseMyJSON(bytes.NewReader(data)); err == nil {
-		t.Fatal("oversized JSON hostname accepted")
-	}
 	var csvData bytes.Buffer
 	writer := csv.NewWriter(&csvData)
-	if err := writer.WriteAll([][]string{{"hostname", "server_type_name"}, {host, "KVM"}}); err != nil {
+	if err := writer.WriteAll([][]string{
+		{"hostname", "server_type_name"}, {"before.example", "KVM"},
+		{host, "KVM"}, {"after.example", "KVM"},
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ParseMyCSV(&csvData); err == nil {
-		t.Fatal("oversized CSV hostname accepted")
+	for _, tc := range []struct {
+		name       string
+		parse      func() ([]MyServer, []string, error)
+		warningRow string
+	}{
+		{"JSON", func() ([]MyServer, []string, error) { return ParseMyJSON(bytes.NewReader(data)) }, "row 2"},
+		{"CSV", func() ([]MyServer, []string, error) { return ParseMyCSV(bytes.NewReader(csvData.Bytes())) }, "row 3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			records, warnings, err := tc.parse()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(records) != 2 || records[0].Hostname != "before.example" || records[1].Hostname != "after.example" {
+				t.Fatalf("valid rows lost: %+v", records)
+			}
+			if len(warnings) != 1 || !strings.Contains(warnings[0], tc.warningRow+": hostname exceeds") || len(warnings[0]) > maxWarningBytes {
+				t.Fatalf("unexpected warnings: %v", warnings)
+			}
+			summary, err := ImportMyIdlers(context.Background(), testDB(t), records, warnings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if summary.Imported != 2 || len(summary.Warnings) != 1 {
+				t.Fatalf("unexpected import: %+v", summary)
+			}
+		})
 	}
 	native, err := json.Marshal(map[string]any{"format": 1, "servers": []any{
 		map[string]any{"server": map[string]any{"hostname": host}},
@@ -134,6 +162,28 @@ func TestImportHostnameLimits(t *testing.T) {
 	}
 	if summary.Servers != 1 || len(summary.Warnings) != 1 || !strings.Contains(summary.Warnings[0], "hostname exceeds") {
 		t.Fatalf("unexpected native result: %+v", summary)
+	}
+}
+
+// TestDiagnosticTextValidUTF8 verifies normalization and truncation preserve valid UTF-8.
+func TestDiagnosticTextValidUTF8(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+		limit             int
+	}{
+		{"valid short", "hello", "hello", 8},
+		{"invalid short", "a\xffb", "a\uFFFDb", 8},
+		{"incomplete sequence", "a\xe2\x82", "a\uFFFD", 8},
+		{"invalid truncated prefix", "a\xffbcdefgh", "a\uFFFDb...", 8},
+		{"normalization exceeds limit", "a\xffb", "a...", 4},
+		{"multibyte boundary", "abc\u754cdef", "abc...", 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := diagnosticText(tc.input, tc.limit)
+			if got != tc.want || !utf8.ValidString(got) || len(got) > tc.limit {
+				t.Fatalf("diagnosticText = %q, want %q within %d bytes", got, tc.want, tc.limit)
+			}
+		})
 	}
 }
 

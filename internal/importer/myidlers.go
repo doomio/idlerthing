@@ -181,7 +181,8 @@ func ParseMyJSON(r io.Reader) ([]MyServer, []string, error) {
 	var warnings []string
 	for i, j := range rows {
 		if len(strings.TrimSpace(j.Hostname)) > maxImportHostnameBytes {
-			return nil, warnings, fmt.Errorf("row %d: hostname exceeds %d bytes", i+1, maxImportHostnameBytes)
+			warnf(&warnings, "row %d: hostname exceeds %d bytes — skipped", i+1, maxImportHostnameBytes)
+			continue
 		}
 		out = append(out, myServerFromJSON(j, &warnings))
 	}
@@ -388,7 +389,8 @@ func ParseMyCSV(r io.Reader) ([]MyServer, []string, error) {
 	var warnings []string
 	for i, row := range rows[1:] {
 		if len(c.cell(row, "hostname")) > maxImportHostnameBytes {
-			return nil, warnings, fmt.Errorf("row %d: hostname exceeds %d bytes", i+2, maxImportHostnameBytes)
+			warnf(&warnings, "row %d: hostname exceeds %d bytes — skipped", i+2, maxImportHostnameBytes)
+			continue
 		}
 		out = append(out, parseCSVRow(c, row, i+2, &warnings)) // header is line 1
 	}

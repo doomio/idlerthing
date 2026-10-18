@@ -20,6 +20,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
@@ -97,5 +98,59 @@ func TestSessionIssuanceRejectsResetCredential(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("current credential created %d sessions", count)
+	}
+}
+
+// TestPasswordChangeSessionIssuanceErrors checks stale credentials and storage failures.
+func TestPasswordChangeSessionIssuanceErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name, trigger string
+		wantStatus    int
+	}{
+		{
+			name: "superseded credential",
+			// Supersede the new hash during session revocation to deterministically
+			// exercise a reset completing before replacement session issuance.
+			trigger: `CREATE TRIGGER supersede_password AFTER DELETE ON sessions BEGIN
+				UPDATE users SET password_hash = 'superseded' WHERE id = OLD.user_id;
+			END`,
+			wantStatus: http.StatusSeeOther,
+		},
+		{
+			name: "database failure",
+			trigger: `CREATE TRIGGER fail_session BEFORE INSERT ON sessions BEGIN
+				SELECT RAISE(FAIL, 'synthetic session storage failure');
+			END`,
+			wantStatus: http.StatusInternalServerError,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, database := newTestServer(t)
+			client := authedClient(t, ts)
+			if _, err := database.Exec(tc.trigger); err != nil {
+				t.Fatal(err)
+			}
+			resp := postForm(t, client, ts, "/settings/account", url.Values{
+				"action": {"password"}, "current_password": {testPassword},
+				"new_password": {"replacement-password"}, "confirm_password": {"replacement-password"},
+			})
+			defer resp.Body.Close()
+			if resp.StatusCode != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.wantStatus)
+			}
+			if tc.wantStatus == http.StatusSeeOther && resp.Header.Get("Location") != "/login" {
+				t.Fatalf("redirect = %q, want /login", resp.Header.Get("Location"))
+			}
+			if hasSessionCookie(resp) {
+				t.Fatal("failed issuance set a session cookie")
+			}
+			var count int
+			if err := database.QueryRow("SELECT COUNT(*) FROM sessions").Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatalf("failed issuance created %d sessions", count)
+			}
+		})
 	}
 }
