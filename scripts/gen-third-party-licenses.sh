@@ -22,7 +22,22 @@ cd "$(git rev-parse --show-toplevel)"
 OUT=${1:-THIRD_PARTY_LICENSES.md}
 MODCACHE=$(go env GOMODCACHE)
 PROBE=$(mktemp)
-trap 'rm -f "$PROBE"' EXIT
+GENERATED=$(mktemp "${OUT}.XXXXXX")
+trap 'rm -f -- "$PROBE" "$GENERATED"' EXIT
+
+# These repository paths must contain ordinary files and directories only.
+# Check parent components too, including when the vendor directory is linked.
+for f in internal/web/assets/vendor internal/web/assets/vendor/*.LICENSE; do
+	path=$f
+	while :; do
+		if [[ -L "$path" ]]; then
+			printf 'ERROR: symlink in vendor license path: %s\n' "$f" >&2
+			exit 1
+		fi
+		[[ "$path" == */* ]] || break
+		path=${path%/*}
+	done
+done
 
 CGO_ENABLED=0 go build -o "$PROBE" .
 
@@ -31,12 +46,16 @@ CGO_ENABLED=0 go build -o "$PROBE" .
 # otherwise glue ``` onto its last line and break the Markdown).
 emit_file() {
 	local path=$1 heading=$2
+	if [[ -L "$path" || ! -f "$path" ]]; then
+		printf 'ERROR: license is not a regular, nonsymlink file: %s\n' "$path" >&2
+		exit 1
+	fi
 	echo
 	echo "### $heading"
 	echo
 	echo '```'
-	cat "$path"
-	[[ -n "$(tail -c1 "$path")" ]] && echo # add a newline only if the file lacks one
+	cat -- "$path"
+	[[ -n "$(tail -c1 -- "$path")" ]] && echo # add a newline only if the file lacks one
 	echo '```'
 }
 
@@ -46,7 +65,7 @@ license_files() {
 	find "$dir" -maxdepth 1 -type f \( \
 		-iname 'LICENSE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \
 		-o -iname 'PATENTS*' -o -iname 'AUTHORS*' -o -iname '*-LICENSE' \
-		\) | sort
+		\) -print0 | sort -z
 }
 
 emit_module() {
@@ -56,14 +75,14 @@ emit_module() {
 	echo
 	echo "## $title"
 	local found=0 has_copyright=0 f
-	while IFS= read -r f; do
+	while IFS= read -r -d '' f; do
 		[[ -z "$f" ]] && continue
 		found=1
-		emit_file "$f" "$(basename "$f")"
+		emit_file "$f" "$(basename -- "$f")"
 		# A real copyright LINE carries a year — the MIT boilerplate phrase
 		# "the above copyright notice" does not, so it must not mask a
 		# genuinely missing notice.
-		if grep -qiE 'copyright.*[12][0-9]{3}' "$f"; then has_copyright=1; fi
+		if grep -qiE 'copyright.*[12][0-9]{3}' -- "$f"; then has_copyright=1; fi
 	done < <(license_files "$dir")
 	if [[ "$found" = 0 ]]; then
 		echo "ERROR: no license file found in $dir" >&2
@@ -74,8 +93,8 @@ emit_module() {
 		# Walk .go files in SORTED order (not grep -r's readdir order) so the
 		# "first copyright line" is deterministic across machines — otherwise
 		# the notices-check gate fails on an unrelated runner.
-		cline=$(find "$dir" -name '*.go' -type f 2>/dev/null | sort \
-			| xargs -r grep -hi copyright 2>/dev/null \
+		cline=$(find "$dir" -name '*.go' -type f -print0 2>/dev/null | sort -z \
+			| xargs -0 -r grep -hi -e copyright -- 2>/dev/null \
 			| grep -m1 -E '[12][0-9]{3}' | sed 's#^[[:space:]/*]*##' || true)
 		if [[ -n "$cline" ]]; then
 			echo
@@ -121,6 +140,8 @@ emit_module() {
 		echo "## Embedded asset: $(basename "$f" .LICENSE)"
 		emit_file "$f" "$(basename "$f")"
 	done
-} >"$OUT"
+} >"$GENERATED"
+
+mv -- "$GENERATED" "$OUT"
 
 echo "wrote $OUT ($(wc -c <"$OUT") bytes)"

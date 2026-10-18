@@ -179,7 +179,10 @@ func ParseMyJSON(r io.Reader) ([]MyServer, []string, error) {
 	}
 	var out []MyServer
 	var warnings []string
-	for _, j := range rows {
+	for i, j := range rows {
+		if len(strings.TrimSpace(j.Hostname)) > maxImportHostnameBytes {
+			return nil, warnings, fmt.Errorf("row %d: hostname exceeds %d bytes", i+1, maxImportHostnameBytes)
+		}
 		out = append(out, myServerFromJSON(j, &warnings))
 	}
 	return out, warnings, nil
@@ -203,7 +206,7 @@ func myServerFromJSON(j miJSON, warnings *[]string) MyServer {
 	myJSONNames(&s, j, warnings)
 
 	if bw, bad := convertBandwidth(j.Bandwidth); bad {
-		*warnings = append(*warnings, fmt.Sprintf("%s: implausible bandwidth — storing NULL", s.Hostname))
+		warnf(warnings, "%s: implausible bandwidth — storing NULL", s.Hostname)
 	} else {
 		s.BandwidthAsMB = bw
 	}
@@ -230,7 +233,7 @@ func myJSONNames(s *MyServer, j miJSON, warnings *[]string) {
 		if d, ok := normDate(*j.OwnedSince); ok {
 			s.OwnedSince = d
 		} else {
-			*warnings = append(*warnings, fmt.Sprintf("%s: invalid owned_since %q — storing NULL", s.Hostname, *j.OwnedSince))
+			warnf(warnings, "%s: invalid owned_since %q — storing NULL", s.Hostname, *j.OwnedSince)
 		}
 	}
 	if j.ServerType != nil && *j.ServerType >= 1 && *j.ServerType <= 7 {
@@ -254,7 +257,7 @@ func myJSONDisks(j miJSON, host string, warnings *[]string) []myDisk {
 		if mb := diskToMB(d.Size, d.Unit); mb > 0 {
 			disks = append(disks, myDisk{SizeMB: mb, Media: diskMedia(d.Media)})
 		} else if d.Size > 0 {
-			*warnings = append(*warnings, fmt.Sprintf("%s: implausible disk size — skipped", host))
+			warnf(warnings, "%s: implausible disk size — skipped", host)
 		}
 	}
 	if len(disks) == 0 && j.DiskAsGB != nil && *j.DiskAsGB > 0 {
@@ -262,7 +265,7 @@ func myJSONDisks(j miJSON, host string, warnings *[]string) []myDisk {
 		if mb := diskToMB(*j.DiskAsGB, "GB"); mb > 0 {
 			disks = append(disks, myDisk{SizeMB: mb, Media: "SSD"})
 		} else {
-			*warnings = append(*warnings, fmt.Sprintf("%s: implausible disk size — skipped", host))
+			warnf(warnings, "%s: implausible disk size — skipped", host)
 		}
 	}
 	return disks
@@ -279,7 +282,7 @@ func myJSONIPs(ips []miJSONIP, host string, warnings *[]string) []myIP {
 		}
 		addr, err := netip.ParseAddr(ip.Address)
 		if err != nil {
-			*warnings = append(*warnings, fmt.Sprintf("%s: invalid ip %q — skipped", host, ip.Address))
+			warnf(warnings, "%s: invalid ip %q — skipped", host, ip.Address)
 			continue
 		}
 		// Store the CANONICAL form (the app does), so "2001:DB8::1" and
@@ -287,7 +290,7 @@ func myJSONIPs(ips []miJSONIP, host string, warnings *[]string) []myIP {
 		// row on UNIQUE(service_id, service_type, address) — keep it once.
 		canon := addr.String()
 		if seen[canon] {
-			*warnings = append(*warnings, fmt.Sprintf("%s: duplicate IP %s listed twice — kept once", host, canon))
+			warnf(warnings, "%s: duplicate IP %s listed twice — kept once", host, canon)
 			continue
 		}
 		seen[canon] = true
@@ -303,11 +306,11 @@ func myJSONPricing(jp *miJSONPricing, host string, warnings *[]string) *myPricin
 	}
 	cur, ok := normCurrency(jp.Currency)
 	if !ok {
-		*warnings = append(*warnings, fmt.Sprintf("%s: invalid currency %q — pricing skipped", host, jp.Currency))
+		warnf(warnings, "%s: invalid currency %q — pricing skipped", host, jp.Currency)
 		return nil
 	}
 	if jp.Term < 1 || jp.Term > 7 {
-		*warnings = append(*warnings, fmt.Sprintf("%s: term %d out of range — pricing skipped", host, jp.Term))
+		warnf(warnings, "%s: term %d out of range — pricing skipped", host, jp.Term)
 		return nil
 	}
 	p := &myPricing{
@@ -319,7 +322,7 @@ func myJSONPricing(jp *miJSONPricing, host string, warnings *[]string) *myPricin
 	if d, ok := normDate(p.NextDueDate); ok {
 		p.NextDueDate = d
 	} else {
-		*warnings = append(*warnings, fmt.Sprintf("%s: invalid next_due_date %q — storing NULL", host, p.NextDueDate))
+		warnf(warnings, "%s: invalid next_due_date %q — storing NULL", host, p.NextDueDate)
 		p.NextDueDate = ""
 	}
 	return p
@@ -384,6 +387,9 @@ func ParseMyCSV(r io.Reader) ([]MyServer, []string, error) {
 	var out []MyServer
 	var warnings []string
 	for i, row := range rows[1:] {
+		if len(c.cell(row, "hostname")) > maxImportHostnameBytes {
+			return nil, warnings, fmt.Errorf("row %d: hostname exceeds %d bytes", i+2, maxImportHostnameBytes)
+		}
 		out = append(out, parseCSVRow(c, row, i+2, &warnings)) // header is line 1
 	}
 	return out, warnings, nil
@@ -429,7 +435,7 @@ func csvBool(v string) bool { return v == "1" }
 func parseCSVRow(c *csvCells, row []string, line int, warnings *[]string) MyServer {
 	owned, ownedOK := normDate(c.cell(row, "owned_since"))
 	if !ownedOK {
-		*warnings = append(*warnings, fmt.Sprintf("row %d: invalid owned_since %q — storing NULL", line, c.cell(row, "owned_since")))
+		warnf(warnings, "row %d: invalid owned_since %q — storing NULL", line, c.cell(row, "owned_since"))
 	}
 	s := MyServer{
 		Hostname:      c.cell(row, "hostname"),
@@ -456,7 +462,7 @@ func parseCSVRow(c *csvCells, row []string, line int, warnings *[]string) MyServ
 	s.LinkSpeed = capMy(csvInt(c.cell(row, "link_speed")), 1<<20, "link_speed", rowLabel, warnings)
 	s.SSHPort = capMy(csvInt(c.cell(row, "ssh")), 65535, "ssh_port", rowLabel, warnings)
 	if bw, bad := convertBandwidth(csvFloat(c.cell(row, "bandwidth"))); bad {
-		*warnings = append(*warnings, fmt.Sprintf("row %d: implausible bandwidth — storing NULL", line))
+		warnf(warnings, "row %d: implausible bandwidth — storing NULL", line)
 	} else {
 		s.BandwidthAsMB = bw
 	}
@@ -475,14 +481,14 @@ func csvDisks(c *csvCells, row []string, line int, host string, warnings *[]stri
 	var disks []miJSONDisk
 	if raw := c.cell(row, "disks"); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &disks); err != nil {
-			*warnings = append(*warnings, fmt.Sprintf("row %d (%s): bad disks JSON", line, host))
+			warnf(warnings, "row %d (%s): bad disks JSON", line, host)
 		}
 	}
 	for _, d := range disks {
 		if mb := diskToMB(d.Size, d.Unit); mb > 0 {
 			out = append(out, myDisk{SizeMB: mb, Media: diskMedia(d.Media)})
 		} else if d.Size > 0 {
-			*warnings = append(*warnings, fmt.Sprintf("row %d: implausible disk size — skipped", line))
+			warnf(warnings, "row %d: implausible disk size — skipped", line)
 		}
 	}
 	if len(out) == 0 {
@@ -490,7 +496,7 @@ func csvDisks(c *csvCells, row []string, line int, host string, warnings *[]stri
 			if mb := diskToMB(*gb, "GB"); mb > 0 {
 				out = append(out, myDisk{SizeMB: mb, Media: "SSD"})
 			} else {
-				*warnings = append(*warnings, fmt.Sprintf("row %d: implausible disk size — skipped", line))
+				warnf(warnings, "row %d: implausible disk size — skipped", line)
 			}
 		}
 	}
@@ -504,7 +510,7 @@ func csvIPs(c *csvCells, row []string, line int, host string, warnings *[]string
 	var ips []miJSONIP
 	if raw := c.cell(row, "ips"); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &ips); err != nil {
-			*warnings = append(*warnings, fmt.Sprintf("row %d (%s): bad ips JSON", line, host))
+			warnf(warnings, "row %d (%s): bad ips JSON", line, host)
 		}
 	}
 	seen := map[string]bool{}
@@ -514,12 +520,12 @@ func csvIPs(c *csvCells, row []string, line int, host string, warnings *[]string
 		}
 		addr, err := netip.ParseAddr(ip.Address)
 		if err != nil {
-			*warnings = append(*warnings, fmt.Sprintf("row %d: invalid ip %q — skipped", line, ip.Address))
+			warnf(warnings, "row %d: invalid ip %q — skipped", line, ip.Address)
 			continue
 		}
 		canon := addr.String() // canonical, like the app stores it
 		if seen[canon] {
-			*warnings = append(*warnings, fmt.Sprintf("row %d: duplicate IP %s listed twice — kept once", line, canon))
+			warnf(warnings, "row %d: duplicate IP %s listed twice — kept once", line, canon)
 			continue
 		}
 		seen[canon] = true
@@ -540,15 +546,15 @@ func csvPricing(c *csvCells, row []string, line int, warnings *[]string) *myPric
 	}
 	due, dueOK := normDate(c.cell(row, "pricing_next_due_date"))
 	if !dueOK {
-		*warnings = append(*warnings, fmt.Sprintf("row %d: invalid next_due_date %q — storing NULL", line, c.cell(row, "pricing_next_due_date")))
+		warnf(warnings, "row %d: invalid next_due_date %q — storing NULL", line, c.cell(row, "pricing_next_due_date"))
 	}
 	if term < 1 || term > 7 {
-		*warnings = append(*warnings, fmt.Sprintf("row %d: term %d out of range — pricing skipped", line, term))
+		warnf(warnings, "row %d: term %d out of range — pricing skipped", line, term)
 		return nil
 	}
 	cur, ok := normCurrency(c.cell(row, "pricing_currency"))
 	if !ok {
-		*warnings = append(*warnings, fmt.Sprintf("row %d: invalid currency %q — pricing skipped", line, c.cell(row, "pricing_currency")))
+		warnf(warnings, "row %d: invalid currency %q — pricing skipped", line, c.cell(row, "pricing_currency"))
 		return nil
 	}
 	return &myPricing{
@@ -604,7 +610,7 @@ func capMy(v *int64, max int64, field, label string, warnings *[]string) *int64 
 		return nil
 	}
 	if *v < 0 || *v > max {
-		*warnings = append(*warnings, fmt.Sprintf("%s: %s %d out of range — storing NULL", label, field, *v))
+		warnf(warnings, "%s: %s %d out of range — storing NULL", label, field, *v)
 		return nil
 	}
 	return v
@@ -695,7 +701,10 @@ type MySummary struct {
 // Duplicate hostnames (existing or earlier in the file) are skipped;
 // per-row failures are warnings, never aborts.
 func ImportMyIdlers(ctx context.Context, db *sql.DB, records []MyServer, warnings []string) (*MySummary, error) {
-	sum := &MySummary{Warnings: warnings}
+	sum := &MySummary{}
+	for _, warning := range warnings {
+		warnf(&sum.Warnings, "%s", warning)
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -705,8 +714,12 @@ func ImportMyIdlers(ctx context.Context, db *sql.DB, records []MyServer, warning
 
 	seen := map[string]bool{}
 	for _, rec := range records {
+		if len(rec.Hostname) > maxImportHostnameBytes {
+			warnf(&sum.Warnings, "hostname exceeds %d bytes — row skipped", maxImportHostnameBytes)
+			continue
+		}
 		if rec.Hostname == "" {
-			sum.Warnings = append(sum.Warnings, "row with empty hostname skipped")
+			warnf(&sum.Warnings, "%s", "row with empty hostname skipped")
 			continue
 		}
 		key := strings.ToLower(rec.Hostname)
@@ -739,7 +752,7 @@ func ImportMyIdlers(ctx context.Context, db *sql.DB, records []MyServer, warning
 		if err := importMyServer(ctx, tx, rec, &delta); err != nil {
 			tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT row")
 			tx.ExecContext(ctx, "RELEASE SAVEPOINT row")
-			sum.Warnings = append(sum.Warnings, fmt.Sprintf("%s: %v", rec.Hostname, err))
+			warnf(&sum.Warnings, "%s: %v", rec.Hostname, err)
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT row"); err != nil {

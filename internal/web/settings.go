@@ -217,11 +217,21 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, u *user)
 		return
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(r.Context(),
+	res, err := tx.ExecContext(r.Context(),
 		`UPDATE users SET password_hash = ?, api_token_hash = NULL,
-			updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-		string(newHash), u.ID); err != nil {
+			updated_at = CURRENT_TIMESTAMP WHERE id = ? AND password_hash = ?`,
+		string(newHash), u.ID, hash)
+	if err != nil {
 		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
+		return
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
+		return
+	}
+	if rows != 1 {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 	// Invalidate ALL sessions for the user — including the current one,
@@ -236,7 +246,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, u *user)
 		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
 		return
 	}
-	if err := s.createSession(w, r, u.ID); err != nil {
+	if err := s.createSession(w, r, u.ID, string(newHash)); err != nil {
 		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
 		return
 	}

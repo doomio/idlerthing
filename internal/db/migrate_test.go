@@ -520,3 +520,54 @@ func latestMigration(t *testing.T) int {
 	}
 	return pending[len(pending)-1].version
 }
+
+func TestMigration0015ImportLookupIndexes(t *testing.T) {
+	database, err := Open(openTemp(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	migrateTo(t, database, 14)
+	for _, tc := range []struct{ table, column, index string }{
+		{"servers", "hostname", "idx_servers_hostname_nocase"},
+		{"providers", "name", "idx_providers_name_nocase"},
+		{"locations", "name", "idx_locations_name_nocase"},
+		{"os", "name", "idx_os_name_nocase"},
+		{"labels", "label", "idx_labels_label_nocase"},
+	} {
+		t.Run(tc.table, func(t *testing.T) {
+			for _, value := range []string{"MiXeD", "mixed"} {
+				if _, err := database.Exec("INSERT INTO "+tc.table+" ("+tc.column+") VALUES (?)", value); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+	if _, err := Migrate(database); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ table, column, index string }{
+		{"servers", "hostname", "idx_servers_hostname_nocase"},
+		{"providers", "name", "idx_providers_name_nocase"},
+		{"locations", "name", "idx_locations_name_nocase"},
+		{"os", "name", "idx_os_name_nocase"},
+		{"labels", "label", "idx_labels_label_nocase"},
+	} {
+		query := "SELECT COUNT(*) FROM " + tc.table + " WHERE " + tc.column + " = ? COLLATE NOCASE"
+		var count int
+		if err := database.QueryRow(query, "MIXED").Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 2 {
+			t.Fatalf("%s lost case variants: %d", tc.table, count)
+		}
+		var id, parent, unused int
+		var detail string
+		if err := database.QueryRow("EXPLAIN QUERY PLAN "+query, "MIXED").Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(detail, "SEARCH") || !strings.Contains(detail, tc.index) {
+			t.Fatalf("%s uses %s", tc.table, detail)
+		}
+	}
+}

@@ -22,6 +22,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -38,6 +39,8 @@ const (
 	sessionCookieName = "idler_session"
 	sessionDuration   = 7 * 24 * time.Hour
 )
+
+var errCredentialsChanged = errors.New("credentials changed during authentication")
 
 // dummyHash is a valid bcrypt hash burned on unknown-email logins so failed
 // attempts take a constant-ish time regardless of why they failed.
@@ -157,7 +160,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
 		return
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil || u.ID == 0 {
 		// The attempted address is attacker-controlled, so it goes AFTER the
 		// source: a crafted value cannot shift the filter's <HOST> capture,
 		// and slog's TextHandler quotes/escapes it.
@@ -166,7 +169,11 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.createSession(w, r, u.ID); err != nil {
+	if err := s.createSession(w, r, u.ID, hash); err != nil {
+		if errors.Is(err, errCredentialsChanged) {
+			s.renderLogin(w, r, token, "Invalid email or password.")
+			return
+		}
 		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
 		return
 	}
@@ -217,8 +224,9 @@ func (s *Server) cookieSecure(r *http.Request) bool {
 	return r.TLS != nil || s.behindTLSProxy
 }
 
-// createSession inserts a new session row and sets the session cookie.
-func (s *Server) createSession(w http.ResponseWriter, r *http.Request, userID int) error {
+// createSession issues a session only while the verified credential is current.
+// The conditional insert serializes with password updates and session revocation.
+func (s *Server) createSession(w http.ResponseWriter, r *http.Request, userID int, verifiedHash string) error {
 	token, err := randomToken(32)
 	if err != nil {
 		return err
@@ -228,10 +236,19 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request, userID in
 		return err
 	}
 	expires := time.Now().Add(sessionDuration).UTC()
-	if _, err := s.db.ExecContext(r.Context(),
-		"INSERT INTO sessions (token, user_id, csrf_token, expires_at) VALUES (?, ?, ?, ?)",
-		token, userID, csrf, expires.Format(time.RFC3339)); err != nil {
+	res, err := s.db.ExecContext(r.Context(), `
+		INSERT INTO sessions (token, user_id, csrf_token, expires_at)
+		SELECT ?, id, ?, ? FROM users WHERE id = ? AND password_hash = ?`,
+		token, csrf, expires.Format(time.RFC3339), userID, verifiedHash)
+	if err != nil {
 		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return errCredentialsChanged
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
