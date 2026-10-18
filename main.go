@@ -171,10 +171,10 @@ func runPasswd(args []string) error {
 		return err
 	}
 	if generated {
-		// codeql[go/clear-text-logging] one-time print to the operator's own
-		// terminal: stdout is verified to be a character device above, so the
-		// plaintext never lands in a pipe, a redirected file, or the service's
-		// journald stream.
+		// One-time print to the operator's own terminal: stdout is verified to
+		// be a character device above, so the plaintext never lands in a pipe,
+		// a redirected file, or the service's journald stream.
+		// codeql[go/clear-text-logging] deliberate: see the check above
 		fmt.Printf("generated admin password: %s\n", password)
 	}
 	fmt.Println("admin password updated; all sessions and the API token were revoked")

@@ -248,8 +248,7 @@ func (s *Server) handleSidebarCounts(w http.ResponseWriter, r *http.Request) {
 // setFlash plants a one-time flash cookie (survives exactly one redirect).
 // The value is URL-escaped since cookie values must be ASCII.
 func (s *Server) setFlash(w http.ResponseWriter, r *http.Request, kind, message string) {
-	// codeql[go/cookie-secure-not-set] deliberate: see cookieSecure in auth.go
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ // codeql[go/cookie-secure-not-set] deliberate: see cookieSecure in auth.go
 		Name:     flashCookieName,
 		Value:    url.QueryEscape(kind + ":" + message),
 		Path:     "/",
@@ -268,8 +267,7 @@ func (s *Server) popFlash(w http.ResponseWriter, r *http.Request) *flash {
 	// Same attributes as the cookie being cleared (see handleLogout): a
 	// non-Secure clear can be refused where the original was Secure, which
 	// would make the flash sticky instead of one-shot.
-	// codeql[go/cookie-secure-not-set] deliberate: see cookieSecure in auth.go
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ // codeql[go/cookie-secure-not-set] deliberate: see cookieSecure in auth.go
 		Name: flashCookieName, Value: "", Path: "/", HttpOnly: true,
 		Secure: s.cookieSecure(r), MaxAge: -1,
 	})
