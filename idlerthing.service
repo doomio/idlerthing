@@ -12,9 +12,12 @@
 #                                    # proxy: Secure session cookies + trust
 #                                    # the last X-Forwarded-For IP
 #   IDLER_BASE_URL=https://idlers.example.com
-#   IDLER_ALLOW_HTTP_INGEST=1          # opt-in: plain-http ingest URLs on LAN hosts
 #                                    # external URL shown in the YABS
 #                                    # ingest command (default: request Host)
+#   IDLER_ALLOW_HTTP_INGEST=1          # opt-in: plain-http ingest URLs on LAN hosts
+#   IDLER_PMAPI_URL=https://cp.pulsedmedia.com
+#                                    # only set to point the PulsedMedia sync
+#                                    # at a test server (blank = built-in feed)
 #
 # No user setup needed — DynamicUser allocates one at runtime, and
 # StateDirectory creates /var/lib/idlerthing with correct ownership. With the

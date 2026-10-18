@@ -51,21 +51,23 @@ func main() {
 	// and dropping it lets the fail2ban filter anchor its patterns at ^.
 	log.SetFlags(0)
 
-	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version") {
-		fmt.Println("idlerthing", version)
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "import" {
-		if err := runImport(os.Args[2:]); err != nil {
-			slog.Error("import failed", "err", err)
-			os.Exit(1)
-		}
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "passwd" {
-		if err := runPasswd(os.Args[2:]); err != nil {
-			slog.Error("passwd failed", "err", err)
-			os.Exit(1)
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version", "--version", "-version":
+			fmt.Println("idlerthing", version)
+		case "import":
+			exitIfError("import", runImport(os.Args[2:]))
+		case "passwd":
+			exitIfError("passwd", runPasswd(os.Args[2:]))
+		case "help", "--help", "-h":
+			usage(os.Stdout)
+		default:
+			// Falling through to run() here would start a web server in
+			// response to a typo — silently, and against whatever database the
+			// operator did not mean to touch.
+			fmt.Fprintf(os.Stderr, "idlerthing: unknown command %q\n\n", os.Args[1])
+			usage(os.Stderr)
+			os.Exit(2)
 		}
 		return
 	}
@@ -73,6 +75,30 @@ func main() {
 		slog.Error("fatal", "err", err)
 		os.Exit(1)
 	}
+}
+
+func usage(w io.Writer) {
+	fmt.Fprintf(w, `usage: idlerthing [command]
+
+  (no command)              run the web server
+  import [--force] <file>   import a JSON export or MyIdlers JSON/CSV dump
+  passwd                    reset the admin password (read from stdin, or
+                            generated when attached to a terminal)
+  version                   print the build version
+  help                      show this message
+
+All commands read the same environment as the server — in particular IDLER_DB
+— which defaults to a path relative to the current directory.
+
+`)
+}
+
+func exitIfError(what string, err error) {
+	if err == nil {
+		return
+	}
+	slog.Error(what+" failed", "err", err)
+	os.Exit(1)
 }
 
 // runPasswd implements `idlerthing passwd`: resets the
@@ -307,7 +333,13 @@ func run() error {
 	// 15s: a prometheus batch can run ~12s worst case.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		// A wedged in-flight request can blow the deadline. Returning that
+		// error exits 1, which Restart=on-failure reads as a crash and uses to
+		// resurrect the process minutes after a deliberate `systemctl stop`.
+		slog.Error("graceful shutdown did not complete", "err", err)
+	}
+	return nil
 }
 
 // loadSecret returns the HMAC secret for yabs ingest URLs. IDLER_SECRET wins

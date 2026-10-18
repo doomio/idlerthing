@@ -4,7 +4,7 @@ BINARY := idlerthing
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 export VERSION
 
-.PHONY: build run test vet notices notices-check license-headers license-check clean
+.PHONY: build run test vet help notices notices-check license-headers license-check clean
 
 # `notices` runs FIRST: THIRD_PARTY_LICENSES.md is embedded into the binary
 # (notices.go), so regenerating it here means what ships always matches what
@@ -50,6 +50,19 @@ license-headers:
 # Cheap and deterministic (no network, no build), so this one DOES gate CI.
 license-check:
 	@./scripts/license-headers.sh --check
+
+# Listed last so `make` keeps defaulting to build.
+help:
+	@echo 'idlerthing targets:'
+	@echo '  build           compile the binary (regenerates notices first)'
+	@echo '  run             run the server from source'
+	@echo '  test            go test ./...'
+	@echo '  vet             gofmt check + go vet — what CI gates on'
+	@echo '  notices         regenerate THIRD_PARTY_LICENSES.md'
+	@echo '  notices-check   fail if THIRD_PARTY_LICENSES.md is stale'
+	@echo '  license-headers stamp the AGPL header on files missing it'
+	@echo '  license-check   fail if any first-party source lacks it'
+	@echo '  clean           remove the built binary'
 
 clean:
 	rm -f $(BINARY)

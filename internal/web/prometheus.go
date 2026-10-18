@@ -66,9 +66,15 @@ type promCache struct {
 // per-request memo, and detached from any request ctx — a disconnecting
 // leader must not fail this check) — used to decide whether a slow fetch
 // still belongs in the cache after a possible mid-fetch settings change.
+// The deadline bounds it: this query queues behind the batch that just ran on
+// the pool's single connection, and parking here would hold the cache lock
+// open indefinitely. A timeout reads as "" — not the URL we fetched for, so
+// the caller drops the result instead of caching it.
 func (s *Server) currentPromURL() string {
 	var u string
-	s.db.QueryRowContext(context.Background(),
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s.db.QueryRowContext(ctx,
 		"SELECT prometheus_url FROM settings WHERE id = 1").Scan(&u)
 	return strings.TrimRight(strings.TrimSpace(u), "/")
 }
