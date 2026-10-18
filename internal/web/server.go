@@ -178,6 +178,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /catalogs/{kind}", s.protect(http.HandlerFunc(s.handleCatalogList)))
 	mux.Handle("POST /catalogs/{kind}", s.protect(http.HandlerFunc(s.handleCatalogCreate)))
 	mux.Handle("POST /catalogs/{kind}/{id}/update", s.protect(http.HandlerFunc(s.handleCatalogUpdate)))
+	mux.Handle("POST /catalogs/{kind}/{id}/key", s.protect(http.HandlerFunc(s.handleProviderKey)))
 	mux.Handle("POST /catalogs/{kind}/{id}/delete", s.protect(http.HandlerFunc(s.handleCatalogDelete)))
 
 	// Servers.

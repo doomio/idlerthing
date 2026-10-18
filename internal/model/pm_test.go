@@ -142,6 +142,75 @@ func TestPMStoreReplaceIsPerProvider(t *testing.T) {
 	}
 }
 
+func TestProviderKeyRoundTrip(t *testing.T) {
+	database := testDB(t)
+	ctx := context.Background()
+	st := &CatalogStore{DB: database}
+
+	id, err := st.Create(ctx, Catalogs["providers"], "Example Host")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if has, err := st.HasProviderKey(ctx, id); err != nil || has {
+		t.Fatalf("a new provider must have no key (has=%v err=%v)", has, err)
+	}
+	if k, err := st.ProviderKey(ctx, id); err != nil || k != "" {
+		t.Fatalf("empty key expected (k=%q err=%v)", k, err)
+	}
+
+	if err := st.SetProviderKey(ctx, id, "pmapi-secret"); err != nil {
+		t.Fatalf("SetProviderKey: %v", err)
+	}
+	if k, err := st.ProviderKey(ctx, id); err != nil || k != "pmapi-secret" {
+		t.Fatalf("key round trip (k=%q err=%v)", k, err)
+	}
+	if has, err := st.HasProviderKey(ctx, id); err != nil || !has {
+		t.Fatalf("HasProviderKey (has=%v err=%v)", has, err)
+	}
+
+	// The generic catalog listing must not have grown a secret.
+	items, err := st.List(ctx, Catalogs["providers"])
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(items) != 1 || items[0].Name != "Example Host" {
+		t.Fatalf("List must return name-only items, got %+v", items)
+	}
+
+	if err := st.SetProviderKey(ctx, id, ""); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if has, err := st.HasProviderKey(ctx, id); err != nil || has {
+		t.Fatalf("cleared key must report absent (has=%v err=%v)", has, err)
+	}
+}
+
+func TestProviderIDsWithKey(t *testing.T) {
+	database := testDB(t)
+	ctx := context.Background()
+	st := &CatalogStore{DB: database}
+
+	withKey, err := st.Create(ctx, Catalogs["providers"], "Has Key")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := st.Create(ctx, Catalogs["providers"], "No Key"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := st.SetProviderKey(ctx, withKey, "k"); err != nil {
+		t.Fatalf("SetProviderKey: %v", err)
+	}
+
+	ids, err := st.ProviderIDsWithKey(ctx)
+	if err != nil {
+		t.Fatalf("ProviderIDsWithKey: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != withKey {
+		t.Fatalf("want exactly the keyed provider, got %v", ids)
+	}
+}
+
 func TestPMStoreReplaceEmptyClears(t *testing.T) {
 	database := testDB(t)
 	ctx := context.Background()

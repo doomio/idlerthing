@@ -73,6 +73,65 @@ type CatalogItem struct {
 	Name string
 }
 
+// The provider catalog carries one write-only secret: a PulsedMedia API key.
+// It is deliberately not a field of CatalogItem, because that struct is
+// returned by the generic list, export and API paths — every one of which
+// would then carry the secret. The accessors below are the only way to reach
+// it, and no path emits it.
+
+// ProviderKey returns a provider's stored PulsedMedia API key ("" when
+// unset). Callers must never render or export the result.
+func (s *CatalogStore) ProviderKey(ctx context.Context, id int64) (string, error) {
+	var key string
+	err := QuerierFrom(ctx, s.DB).QueryRowContext(ctx,
+		"SELECT pm_api_key FROM providers WHERE id = ?", id).Scan(&key)
+	if err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
+// SetProviderKey replaces a provider's API key; "" clears it.
+func (s *CatalogStore) SetProviderKey(ctx context.Context, id int64, key string) error {
+	res, err := s.DB.ExecContext(ctx,
+		"UPDATE providers SET pm_api_key = ? WHERE id = ?", key, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+// HasProviderKey reports whether a provider holds a key, without reading it.
+func (s *CatalogStore) HasProviderKey(ctx context.Context, id int64) (bool, error) {
+	var n int
+	err := QuerierFrom(ctx, s.DB).QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM providers WHERE id = ? AND pm_api_key <> ''", id).Scan(&n)
+	return n > 0, err
+}
+
+// ProviderIDsWithKey lists providers that hold a key — the ones a sync should
+// fetch. It never returns the keys themselves.
+func (s *CatalogStore) ProviderIDsWithKey(ctx context.Context) ([]int64, error) {
+	rows, err := QuerierFrom(ctx, s.DB).QueryContext(ctx,
+		"SELECT id FROM providers WHERE pm_api_key <> '' ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // CatalogStore wraps the DB for catalog queries.
 type CatalogStore struct {
 	DB *sql.DB
