@@ -1,0 +1,44 @@
+{
+  "client_id": 54311,
+  "generated_at": "2026-10-16T20:12:08Z",
+  "currency": "EUR",
+  "services": [
+    {
+      "id": 72645,
+      "product": "Dragon-R",
+      "group": "Example Group",
+      "domain": "box1.example.net",
+      "status": "Active",
+      "registered": "2026-09-04",
+      "next_due": "2027-05-03",
+      "billing_cycle": "Quarterly",
+      "recurring_amount": "44.97",
+      "seedbox": {
+        "username": "exuser",
+        "login_url": "https://box1.example.net/user-exuser/",
+        "permanent_address": "http://abcd1234.example.net/",
+        "usage": {
+          "tracked_since": "2026-09-08",
+          "sent_bytes": 2905931361157,
+          "received_bytes": 1915497397,
+          "cpu_hours": 1,
+          "cpu_since": "2026-10-06",
+          "disk_used_bytes": 307260497920,
+          "disk_quota_bytes": 9910637035520,
+          "torrents": 7
+        }
+      }
+    },
+    {
+      "id": 1,
+      "product": "Something",
+      "group": "g",
+      "domain": "x.example",
+      "status": "Cancelled",
+      "registered": "2026-01-01",
+      "next_due": "",
+      "billing_cycle": "Free Account",
+      "recurring_amount": 0
+    }
+  ]
+}
