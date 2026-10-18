@@ -32,7 +32,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
   </div>
   <div class="head-actions">
     <a class="btn" href="/servers/{{$s.ID}}/edit">✎ Edit</a>
-    <form method="post" action="/servers/{{$s.ID}}/delete" hx-post="/servers/{{$s.ID}}/delete" hx-confirm="Delete {{$s.Hostname}}?">
+    <form method="post" action="/js-required" hx-post="/servers/{{$s.ID}}/delete" hx-confirm="Delete {{$s.Hostname}}?">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <button class="btn btn-danger" type="submit">🗑 Delete</button>
     </form>
@@ -123,7 +123,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
     {{if $v.YABSCommand}}
     <div class="cmd-block">
       <code class="mono">{{$v.YABSCommand}}</code>
-      <button class="icon-btn copy-btn" type="button" data-copy="{{$v.YABSCommand}}" title="Copy">⧉</button>
+      <button class="icon-btn copy-btn" type="button" data-copy="{{$v.YABSCommand}}" aria-label="Copy the ingest command" title="Copy">⧉</button>
     </div>
     {{else}}
     <div class="empty-sub">Set <code class="mono">IDLER_BASE_URL=https://…</code> (or <code class="mono">IDLER_ALLOW_HTTP_INGEST=1</code> on a LAN) to enable the ingest command.</div>

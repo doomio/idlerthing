@@ -185,12 +185,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
           <form class="ping-form" hx-post="/tools/ping" hx-target="#ping-srv-{{.ID}}" hx-swap="innerHTML">
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
             <input type="hidden" name="host" value="{{.Hostname}}">
-            <button class="icon-btn" type="submit" title="Ping">⇄</button>
+            <button class="icon-btn" type="submit" aria-label="Ping {{.Hostname}}" title="Ping">⇄</button>
           </form>
-          <a class="icon-btn" href="/servers/{{.ID}}/edit" title="Edit">✎</a>
-          <form method="post" action="/servers/{{.ID}}/delete" hx-post="/servers/{{.ID}}/delete" hx-confirm="Delete {{.Hostname}}?">
+          <a class="icon-btn" href="/servers/{{.ID}}/edit" aria-label="Edit {{.Hostname}}" title="Edit">✎</a>
+          <form method="post" action="/js-required" hx-post="/servers/{{.ID}}/delete" hx-confirm="Delete {{.Hostname}}?">
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-            <button class="icon-btn danger" type="submit" title="Delete">🗑</button>
+            <button class="icon-btn danger" type="submit" aria-label="Delete {{.Hostname}}" title="Delete">🗑</button>
           </form>
         </div>
       </td>

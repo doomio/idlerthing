@@ -232,6 +232,13 @@ func TestFleetExcludesCancelledFromTotals(t *testing.T) {
 		if !strings.Contains(body, "14.99") {
 			t.Fatalf("the active service's monthly cost is missing (%q)", q)
 		}
+		// The tiles are active-only, so the page has to account for the
+		// cancelled boxes it shows — and stay quiet when it shows none.
+		if note := strings.Contains(body, "cancelled listed below"); q == "" && note {
+			t.Fatal("the cancelled note appears while no cancelled box is listed")
+		} else if q != "" && !note {
+			t.Fatal("a cancelled box is listed without saying it is excluded from the tiles")
+		}
 	}
 }
 

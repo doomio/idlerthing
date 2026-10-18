@@ -27,7 +27,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
   </div>
   <div class="head-actions">
     <a class="btn" href="{{$v.EditURL}}">✎ Edit</a>
-    <form method="post" action="{{$v.DeleteURL}}" hx-post="{{$v.DeleteURL}}" hx-confirm="{{$v.DeleteConfirm}}">
+    <form method="post" action="/js-required" hx-post="{{$v.DeleteURL}}" hx-confirm="{{$v.DeleteConfirm}}">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <button class="btn btn-danger" type="submit">🗑 Delete</button>
     </form>

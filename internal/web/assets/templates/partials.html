@@ -112,7 +112,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       <div class="note-body">{{.Body}}</div>
       <div class="note-meta">
         <span class="mono">{{dateFmt .CreatedAt}}</span>
-        <form method="post" action="/notes/{{.ID}}/delete" hx-post="/notes/{{.ID}}/delete" hx-confirm="Delete note?">
+        <form method="post" action="/js-required" hx-post="/notes/{{.ID}}/delete" hx-confirm="Delete note?">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="hidden" name="back" value="{{$e.BackURL}}">
           <button class="link-btn" type="submit">delete</button>
@@ -150,12 +150,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
               <form method="post" action="/ips/{{.ID}}/whois">
                 <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                 <input type="hidden" name="back" value="{{$e.BackURL}}">
-                <button class="icon-btn" type="submit" title="Refresh whois">↻</button>
+                <button class="icon-btn" type="submit" aria-label="Refresh whois for this address" title="Refresh whois">↻</button>
               </form>
-              <form method="post" action="/ips/{{.ID}}/delete" hx-post="/ips/{{.ID}}/delete" hx-confirm="Delete IP?">
+              <form method="post" action="/js-required" hx-post="/ips/{{.ID}}/delete" hx-confirm="Delete IP?">
                 <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
                 <input type="hidden" name="back" value="{{$e.BackURL}}">
-                <button class="icon-btn danger" type="submit" title="Delete">🗑</button>
+                <button class="icon-btn danger" type="submit" aria-label="Delete this IP" title="Delete">🗑</button>
               </form>
             </div>
           </td>

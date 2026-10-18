@@ -327,6 +327,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /servers/{id}/yabs/{yid}/delete", s.protect(http.HandlerFunc(s.handleServerYABSDelete)))
 	mux.Handle("POST /tools/ping", s.protect(http.HandlerFunc(s.handlePing)))
 
+	// Fallback target for every destructive form whose confirmation only htmx
+	// can provide (see handleJSRequired).
+	mux.Handle("POST /js-required", s.protect(http.HandlerFunc(s.handleJSRequired)))
+	// Re-rendered after an in-place htmx swap so the sidebar counts catch up.
+	mux.Handle("GET /partials/counts", s.protect(http.HandlerFunc(s.handleSidebarCounts)))
+
 	return s.recoverMiddleware(s.securityHeaders(s.loadSession(mux)))
 }
 

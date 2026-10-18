@@ -89,10 +89,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       {{end}}
       <td class="col-actions">
         <div class="row-actions">
-          <a class="icon-btn" href="{{.EditURL}}" title="Edit">✎</a>
-          <form method="post" action="{{.DeleteURL}}" hx-post="{{.DeleteURL}}" hx-confirm="{{.DeleteConfirm}}">
+          <a class="icon-btn" href="{{.EditURL}}" aria-label="Edit this entry" title="Edit">✎</a>
+          <form method="post" action="/js-required" hx-post="{{.DeleteURL}}" hx-confirm="{{.DeleteConfirm}}">
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-            <button class="icon-btn danger" type="submit" title="Delete">🗑</button>
+            <button class="icon-btn danger" type="submit" aria-label="Delete this entry" title="Delete">🗑</button>
           </form>
         </div>
       </td>

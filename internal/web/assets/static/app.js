@@ -50,3 +50,51 @@ document.addEventListener('input', function (e) {
     if (picker && /^#[0-9a-fA-F]{6}$/.test(e.target.value)) picker.value = e.target.value;
   }
 });
+
+// ---------- htmx enhancements ----------
+
+// A failed request must not look like a successful one. Before this, a 500 from
+// a swap (a broken sort link, a catalog save that blew up) changed nothing on
+// screen: no message, no spinner, and the click appeared to have done the work.
+function setAlert(message) {
+  const slot = document.getElementById('htmx-alert');
+  if (!slot) return;
+  slot.textContent = '';
+  if (!message) return;
+  const box = document.createElement('div');
+  box.className = 'flash flash-err';
+  box.setAttribute('role', 'alert');
+  box.textContent = message;
+  slot.appendChild(box);
+}
+
+document.body.addEventListener('htmx:beforeRequest', function () { setAlert(''); });
+document.body.addEventListener('htmx:responseError', function (e) {
+  const status = e.detail && e.detail.xhr ? e.detail.xhr.status : 0;
+  setAlert('That request failed' + (status ? ' (HTTP ' + status + ')' : '') +
+    ' — nothing was changed.');
+});
+document.body.addEventListener('htmx:sendError', function () {
+  setAlert('The request could not be sent — is the server still reachable?');
+});
+
+// A catalog mutation swaps only its own list, so the counts in the sidebar are
+// re-fetched when the response asks for it (HX-Trigger: counts-changed). The
+// nav key comes from the item that is highlighted right now, so the refreshed
+// column keeps the same selection.
+document.body.addEventListener('counts-changed', function () {
+  const active = document.querySelector('#sidebar-nav .nav-item.active');
+  const href = active ? (active.getAttribute('href') || '') : '';
+  const nav = href.replace(/^\/(?:catalogs\/)?/, '');
+  htmx.ajax('GET', '/partials/counts?nav=' + encodeURIComponent(nav),
+    { target: '#sidebar-nav', swap: 'outerHTML' });
+});
+
+// data-confirm on a plain form: the protection hx-confirm gives htmx forms, for
+// the ones that post normally (rotating the API token). Without JavaScript the
+// form submits as before, which is why only genuinely destructive actions use
+// it — the delete forms have no plain action at all.
+document.addEventListener('submit', function (e) {
+  const msg = e.target.dataset ? e.target.dataset.confirm : '';
+  if (msg && !window.confirm(msg)) e.preventDefault();
+});

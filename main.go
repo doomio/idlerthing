@@ -191,7 +191,7 @@ func runImport(args []string) error {
 		}
 	}
 	if file == "" {
-		return fmt.Errorf("usage: idlerthing import [--force] <file.json>")
+		return fmt.Errorf("usage: idlerthing import [--force] <file> (JSON or CSV, detected from the content)")
 	}
 
 	cfg := config.Load()

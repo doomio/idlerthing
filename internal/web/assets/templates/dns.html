@@ -39,11 +39,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       <td>{{if .LinkURL}}<a href="{{.LinkURL}}">{{.LinkName}}</a>{{else}}{{.LinkName}}{{end}}</td>
       <td class="col-actions">
         <div class="row-actions">
-          <a class="icon-btn" href="/dns/{{.ID}}/edit" title="Edit">✎</a>
-          <form method="post" action="/dns/{{.ID}}/delete" hx-post="/dns/{{.ID}}/delete" hx-confirm="Delete {{.Hostname}}?">
+          <a class="icon-btn" href="/dns/{{.ID}}/edit" aria-label="Edit {{.Hostname}}" title="Edit">✎</a>
+          <form method="post" action="/js-required" hx-post="/dns/{{.ID}}/delete" hx-confirm="Delete {{.Hostname}}?">
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
             <input type="hidden" name="back" value="/dns">
-            <button class="icon-btn danger" type="submit" title="Delete">🗑</button>
+            <button class="icon-btn danger" type="submit" aria-label="Delete {{.Hostname}}" title="Delete">🗑</button>
           </form>
         </div>
       </td>

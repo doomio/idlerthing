@@ -54,7 +54,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 {{else}}
 
 <div class="stat-grid fleet-stats">
-  <div class="stat-card"><div class="stat-label">Boxes</div><div class="stat-value mono">{{$v.Totals.Boxes}}</div></div>
+  <div class="stat-card">
+    <div class="stat-label">Boxes</div>
+    <div class="stat-value mono">{{$v.Totals.Boxes}}</div>
+    {{if $v.Totals.Cancelled}}<div class="stat-sub">{{$v.Totals.Cancelled}} cancelled listed below, counted in nothing above</div>{{end}}
+  </div>
   <div class="stat-card"><div class="stat-label">Storage used</div><div class="stat-value mono">{{fmtMB $v.Totals.StorageUsedMB}} <small>/ {{fmtMB $v.Totals.StorageMB}}</small></div></div>
   <div class="stat-card"><div class="stat-label">Traffic sent</div><div class="stat-value mono">{{fmtMB $v.Totals.SentMB}}</div><div class="stat-sub">Provider-reported; periods may differ by box</div></div>
   <div class="stat-card"><div class="stat-label">Traffic received</div><div class="stat-value mono">{{fmtMB $v.Totals.ReceivedMB}}</div><div class="stat-sub">Provider-reported; periods may differ by box</div></div>
@@ -107,8 +111,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 <div class="panel empty-state">
   <div class="empty-title">No linked seedboxes</div>
   <div class="empty-sub">
-    Link a seedbox to one of this provider's services from its edit page,
-    then sync.
+    This page only shows seedboxes that are linked to a service from the
+    provider's feed. Sync first to fetch that feed, then open a seedbox's edit
+    page and pick its service under “PulsedMedia service”.
+  </div>
+  <div class="fleet-actions">
+    <a class="btn" href="/seedboxes">Seedboxes</a>
+    <a class="btn btn-primary" href="/settings">Providers and API keys</a>
   </div>
 </div>
 {{end}}

@@ -49,17 +49,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
           <form class="ping-form" hx-post="/tools/ping" hx-target="#ping-ip-{{.ID}}" hx-swap="innerHTML">
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
             <input type="hidden" name="host" value="{{.Address}}">
-            <button class="icon-btn" type="submit" title="Ping">⇄</button>
+            <button class="icon-btn" type="submit" aria-label="Ping {{.Address}}" title="Ping">⇄</button>
           </form>
           <form method="post" action="/ips/{{.ID}}/whois">
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
             <input type="hidden" name="back" value="/ips">
-            <button class="icon-btn" type="submit" title="Refresh whois">↻</button>
+            <button class="icon-btn" type="submit" aria-label="Refresh whois for {{.Address}}" title="Refresh whois">↻</button>
           </form>
-          <form method="post" action="/ips/{{.ID}}/delete" hx-post="/ips/{{.ID}}/delete" hx-confirm="Delete {{.Address}}?">
+          <form method="post" action="/js-required" hx-post="/ips/{{.ID}}/delete" hx-confirm="Delete {{.Address}}?">
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
             <input type="hidden" name="back" value="/ips">
-            <button class="icon-btn danger" type="submit" title="Delete">🗑</button>
+            <button class="icon-btn danger" type="submit" aria-label="Delete {{.Address}}" title="Delete">🗑</button>
           </form>
         </div>
       </td>

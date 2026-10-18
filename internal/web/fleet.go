@@ -63,6 +63,7 @@ type fleetBox struct {
 // cancelled service's price is not money being spent.
 type fleetTotals struct {
 	Boxes         int
+	Cancelled     int // listed on the page but excluded from every figure here
 	StorageMB     int64
 	StorageUsedMB int64
 	SentMB        int64
@@ -230,6 +231,7 @@ func fleetTiles(boxes []fleetBox) fleetTotals {
 	var t fleetTotals
 	for _, b := range boxes {
 		if b.Cancelled {
+			t.Cancelled++
 			continue
 		}
 		t.Boxes++

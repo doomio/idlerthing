@@ -225,6 +225,9 @@ func (s *Server) respondCatalogMutation(w http.ResponseWriter, r *http.Request, 
 	}
 	if errMsg == "" {
 		s.touchDashboard() // successful htmx mutations invalidate too
+		// The swap replaces only the list, so tell the page to re-fetch the
+		// sidebar counts (app.js listens for this event name).
+		w.Header().Set("HX-Trigger", "counts-changed")
 	}
 	items, err := s.catalogs.List(r.Context(), kind)
 	if err != nil {

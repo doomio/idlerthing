@@ -125,6 +125,19 @@ func sameOriginPath(raw, fallback string) string {
 	return u.RequestURI()
 }
 
+// handleJSRequired is where the destructive forms land when JavaScript is off.
+// Their confirmation lives in htmx's hx-confirm, which cannot run without it, so
+// a working plain action would leave "delete this record, permanently, on a
+// single stray click" as the no-JS path. Refusing is the safer fallback; the
+// confirmed path is the hx-post, which is what runs whenever htmx loaded. The
+// CSRF token travels in the body, so this stays a normal protected unsafe
+// request either way.
+func (s *Server) handleJSRequired(w http.ResponseWriter, r *http.Request) {
+	s.setFlash(w, r, "err",
+		"That action needs JavaScript: its confirmation cannot run without it, so nothing was changed.")
+	redirectBack(w, r, "/")
+}
+
 // formInt64 parses a required int64 form field.
 func formInt64(r *http.Request, name string) (int64, error) {
 	return strconv.ParseInt(r.FormValue(name), 10, 64)

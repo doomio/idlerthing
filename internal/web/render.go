@@ -222,6 +222,29 @@ func (s *Server) newPageData(w http.ResponseWriter, r *http.Request, title, nav 
 	return d
 }
 
+// handleSidebarCounts re-renders just the navigation column. A catalog
+// mutation swaps its list in place (that is why the swap target is the list and
+// not the page), so the counts beside it would otherwise lag until the next
+// full navigation. It deliberately does NOT pop the flash cookie: this response
+// carries no flash slot, and consuming the cookie here would eat the message
+// meant for the next real page view.
+func (s *Server) handleSidebarCounts(w http.ResponseWriter, r *http.Request) {
+	d := pageData{
+		Theme: s.currentTheme(r),
+		User:  userFromCtx(r.Context()),
+	}
+	// The caller passes the nav key it currently shows as active, so the
+	// refreshed column keeps the highlight. It is only ever compared against
+	// the template's fixed names — never rendered — so any other value simply
+	// matches nothing.
+	d.Nav = r.URL.Query().Get("nav")
+	d.Counts = s.counts(r)
+	if sess := sessionFromCtx(r.Context()); sess != nil {
+		d.CSRFToken = sess.CSRFToken
+	}
+	s.renderNamed(w, "dashboard", "sidebar_nav", d)
+}
+
 // setFlash plants a one-time flash cookie (survives exactly one redirect).
 // The value is URL-escaped since cookie values must be ASCII.
 func (s *Server) setFlash(w http.ResponseWriter, r *http.Request, kind, message string) {
