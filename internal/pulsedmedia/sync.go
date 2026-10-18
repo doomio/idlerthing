@@ -122,6 +122,19 @@ func Sync(ctx context.Context, db *sql.DB, providerID int64, key, url string, no
 	if err := (&model.PMStore{DB: db}).ReplaceTx(ctx, tx, providerID, cached); err != nil {
 		return Result{}, err
 	}
+	// A newly discovered exact-host link must be reconciled in this same
+	// transaction, not on the next manual sync.
+	candidates, err := model.UnlinkedSeedboxesTx(ctx, tx, providerID)
+	if err != nil {
+		return Result{}, err
+	}
+	for _, candidate := range candidates {
+		if id, ok := matchService(candidate.Hostname, cached); ok {
+			if err := model.LinkSeedboxTx(ctx, tx, candidate.SeedboxID, id); err != nil {
+				return Result{}, err
+			}
+		}
+	}
 
 	links, err := model.LinkedSeedboxesTx(ctx, tx, providerID)
 	if err != nil {
