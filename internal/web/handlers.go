@@ -40,6 +40,10 @@ type Counts struct {
 	Labels    int
 	YABS      int
 	Notes     int
+	// PMFleet is the number of seedboxes linked to a provider feed. Zero
+	// hides the fleet nav link, so the view is invisible until it can show
+	// something.
+	PMFleet int
 }
 
 // counts runs a cheap COUNT(*) per table. Fine at this app's scale.
@@ -58,7 +62,8 @@ const countsTables = `SELECT
 	(SELECT COUNT(*) FROM providers),
 	(SELECT COUNT(*) FROM labels),
 	(SELECT COUNT(*) FROM yabs),
-	(SELECT COUNT(*) FROM notes)`
+	(SELECT COUNT(*) FROM notes),
+	(SELECT COUNT(*) FROM seedboxes WHERE pm_service_id IS NOT NULL)`
 
 // countsTTL backstops the generation key: out-of-band writes (CLI import
 // against the running server's DB, WAL-permitted) never bump gen, so a
@@ -84,11 +89,11 @@ func (s *Server) counts(r *http.Request) Counts {
 	}
 
 	var c Counts
-	// One round trip for all 14 counts.
+	// One round trip for all 15 counts.
 	err := s.db.QueryRowContext(r.Context(), countsTables).Scan(
 		&c.Servers, &c.Shared, &c.Reseller, &c.Seedboxes, &c.Domains,
 		&c.Misc, &c.DNS, &c.IPs, &c.Locations, &c.OS, &c.Providers,
-		&c.Labels, &c.YABS, &c.Notes)
+		&c.Labels, &c.YABS, &c.Notes, &c.PMFleet)
 	if err != nil {
 		return Counts{}
 	}

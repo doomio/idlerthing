@@ -98,8 +98,7 @@ func (s *Server) seedboxSection() *section {
 				{Label: "Monthly cost", Value: monthly},
 				{Label: "Yearly cost", Value: yearly},
 			}
-		},
-		Delete: st.Delete,
+		}, Delete: st.Delete,
 		Detail: func(r *http.Request, id int64) (*detailView, error) {
 			b, pricing, err := st.Get(r.Context(), id)
 			if err != nil {

@@ -73,6 +73,10 @@ type Server struct {
 	baseURL         string         // IDLER_BASE_URL ("" = derive from request)
 	whoisRate       whoisRateLimit // per-server whois throttle (fresh in tests)
 
+	// pmapiURL overrides the PulsedMedia feed endpoint (IDLER_PMAPI_URL).
+	// Empty uses the built-in URL; tests point it at a mock server.
+	pmapiURL string
+
 	// AGPL §13 texts, injected from package main (go:embed cannot reach the
 	// repo root from here) — see legal.go.
 	license    []byte
@@ -117,6 +121,12 @@ func (s *Server) SetSecret(secret []byte) {
 // SetBehindTLSProxy marks the app as behind an HTTPS-terminating proxy.
 func (s *Server) SetBehindTLSProxy(behind bool) {
 	s.behindTLSProxy = behind
+}
+
+// SetPMAPIURL points the PulsedMedia feed client at a different endpoint.
+// Empty (the default) uses the built-in customer-API URL.
+func (s *Server) SetPMAPIURL(url string) {
+	s.pmapiURL = url
 }
 
 // SetAllowHTTPIngest permits plain-http ingest URLs on LAN hosts.
@@ -219,6 +229,10 @@ func (s *Server) Handler() http.Handler {
 	// Seedboxes.
 	seedboxSec := s.seedboxSection()
 	mux.Handle("GET /seedboxes", s.protect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.handleSectionList(w, r, seedboxSec) })))
+	// Registered before /seedboxes/{id}: the literal wins, so "fleet" is not
+	// parsed as an id.
+	mux.Handle("GET /seedboxes/fleet", s.protect(http.HandlerFunc(s.handleSeedboxFleet)))
+	mux.Handle("POST /seedboxes/fleet/sync", s.protect(http.HandlerFunc(s.handleSeedboxFleetSync)))
 	mux.Handle("GET /seedboxes/new", s.protect(http.HandlerFunc(s.handleSeedboxNew)))
 	mux.Handle("POST /seedboxes", s.protect(http.HandlerFunc(s.handleSeedboxCreate)))
 	mux.Handle("GET /seedboxes/{id}", s.protect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.handleSectionDetail(w, r, seedboxSec) })))
