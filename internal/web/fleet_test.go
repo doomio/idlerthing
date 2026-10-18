@@ -389,3 +389,44 @@ func fleetFlash(t *testing.T, client *http.Client, ts *httptest.Server) string {
 	}
 	return "(no flash rendered)"
 }
+
+// The fleet page holds "Sync now", and a seedbox can only be linked to a feed
+// that has been synced, so gating its nav link on an existing link left the
+// first sync unreachable. A key on a provider is enough to offer the page.
+func TestFleetNavOffersThePageOnceAKeyExists(t *testing.T) {
+	ts, database, _ := newTestServerFull(t)
+	seedProviderWithKey(t, database, testProviderKey)
+	client := authedClient(t, ts)
+
+	resp, err := client.Get(ts.URL + "/servers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+
+	if !strings.Contains(body, `href="/seedboxes/fleet"`) {
+		t.Fatal("a keyed provider must offer the fleet view even with nothing linked yet")
+	}
+	if strings.Contains(body, "Old Box") {
+		t.Error("the nav link must not pull fleet data into another page")
+	}
+}
+
+// With no key anywhere, the fleet has nothing to read — the link stays out of
+// the way rather than promising an empty page.
+func TestFleetNavHiddenWithoutAKey(t *testing.T) {
+	ts, _, _ := newTestServerFull(t)
+	client := authedClient(t, ts)
+
+	resp, err := client.Get(ts.URL + "/servers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+
+	if strings.Contains(body, `href="/seedboxes/fleet"`) {
+		t.Fatal("the fleet link should not appear for an install that cannot use it")
+	}
+}

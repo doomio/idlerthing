@@ -18,8 +18,10 @@ benchmarks. SQLite storage, no cgo, no external services required.
   change, API token management.
 - **JSON API** — Bearer-token read access to everything, full CRUD for
   servers, paginated.
-- **Export/import** — full JSON export and CSV zip; restore with
-  `idlerthing import`.
+- **Export/import** — full JSON export plus a CSV zip for spreadsheets. Restore
+  with `idlerthing import`, which reads this app's own JSON export, a
+  my-idlers JSON dump, or a my-idlers CSV — the format is detected from the
+  file, not from its extension.
 - **YABS** — signed ingest URLs for yabs.sh results, run history and views.
 - **PulsedMedia provider** — put a read-only customer-API key on a provider
   and its services sync into a fleet view: disk against quota, traffic,
@@ -57,7 +59,8 @@ for `First run: the admin password is in ...`). Read it, sign in as
 `admin@localhost`, and the file is deleted automatically. The password never
 goes to the log stream, because a journal entry is retained, group-readable,
 and often forwarded long after you need the credential. To choose the password
-instead, set `IDLER_ADMIN_PASSWORD` (min 8 chars) before the first start.
+instead, set `IDLER_ADMIN_PASSWORD` (8–72 bytes, the same policy as
+**Settings → Account**) before the first start.
 
 ## systemd
 
@@ -148,7 +151,11 @@ in by hand.
    no separate checkbox. Leave the field blank to keep the key, or
    check **clear** to disable sync. The key is write-only: it is stored, never
    rendered back into the page, and never exported.
-3. **Seedboxes → Fleet** → **Sync now**.
+3. **Fleet** (in the sidebar, beside SeedBoxes) → **Sync now**.
+
+The Fleet link appears as soon as any provider holds a key, and its count is the
+number of seedboxes that are linked — zero right after you add the key, which is
+correct: nothing is linked until the feed has been fetched once and matched.
 
 Every service on the account is cached locally. A seedbox is linked
 only when its hostname uniquely matches a service domain or permanent address.
@@ -179,20 +186,77 @@ JSON/CSV exports do not include the key; restore it separately if needed.
 | `IDLER_ADDR`          | `127.0.0.1:8080`         | HTTP listen address                      |
 | `IDLER_DB`            | `./data/idlerthing.db`   | SQLite file path                         |
 | `IDLER_ADMIN_PASSWORD`| *(none)*                 | First-run admin password (seed only)     |
-| `IDLER_SECRET`        | *(generated)*            | YABS ingest HMAC key; persisted to `<db>.secret` when unset |
+| `IDLER_SECRET`        | *(generated)*            | YABS ingest HMAC key, **minimum 16 bytes**; persisted to `<db>.secret` (0600) when unset. A shorter value — from the env var or the file — is a fatal startup error, not a warning |
 | `IDLER_BEHIND_TLS_PROXY` | *(off)*             | Set `1`/`true`/`yes` behind an HTTPS-terminating proxy: session cookies go `Secure` and the last `X-Forwarded-For` IP is trusted |
 | `IDLER_BASE_URL`      | *(none)*                 | External URL used in the YABS ingest command (default: request scheme+Host) |
 | `IDLER_ALLOW_HTTP_INGEST` | *(off)*              | Allow plain-http YABS ingest URLs on LAN hosts (loopback http and https always work) |
 | `IDLER_PMAPI_URL`     | `https://pulsedmedia.com/remote/pmapi-feed.php` | Override the PulsedMedia customer-API endpoint (for tests and mocks) |
 
+## CLI commands
+
+The subcommands live in the same binary as the server and read the **same
+environment**, above all `IDLER_DB`:
+
+```sh
+sudo systemctl stop idlerthing
+sudo IDLER_DB=/var/lib/idlerthing/data/idlerthing.db idlerthing passwd
+sudo chown --reference=/var/lib/idlerthing /var/lib/idlerthing/data/idlerthing.db*
+sudo systemctl start idlerthing
+```
+
+That matters more than it looks: the default `IDLER_DB` (`./data/idlerthing.db`)
+is relative to the **current directory**, while the unit runs with
+`WorkingDirectory=%S/idlerthing`. A bare `idlerthing passwd` from your shell
+therefore targets a different file — and, if it does not exist, creates an empty
+database at 0600 that the service never reads.
+
+| Command                           | What it does                                                        |
+| --------------------------------- | ------------------------------------------------------------------- |
+| `idlerthing`                      | run the web server in the foreground (the unit's `ExecStart`)       |
+| `idlerthing import [--force] <f>` | import this app's JSON export, a my-idlers JSON dump, or a CSV      |
+| `idlerthing passwd`               | reset the admin password, revoking every session and the API token  |
+| `idlerthing version`              | print the build version                                             |
+| `idlerthing help`                 | show the usage text                                                 |
+
+`import` and `passwd` open the database directly, so stop the service first:
+SQLite takes one writer at a time, and a second process gives up after the
+5-second `busy_timeout` with `database is locked`. `passwd` reads the new
+password from standard input, or generates one when it is attached to a terminal
+— arguments are refused because other local users can read command lines.
+
+Because the unit runs as a `DynamicUser`, the CLI has to run as root to touch
+that database at all, which leaves root-owned files behind: the `chown
+--reference` above hands them back to the owner of `/var/lib/idlerthing`. If you
+are signed in, **Settings → Account** changes the password without any of this.
+
 ## Backup & restore
+
+The database file is the whole application — services, prices, notes, labels,
+YABS history, settings, and the provider API keys. Treat it as a secret: the
+PulsedMedia key is stored inside it (the app keeps the database at 0600 for
+exactly that reason), and so is the ingest HMAC secret beside it.
+
+| Path                          | What it is                                                                                     |
+| ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| `<IDLER_DB>`                  | the SQLite database                                                                              |
+| `<IDLER_DB>-wal` / `-shm`     | WAL sidecars — the newest commits may still be in `-wal`, so copy all three or none             |
+| `<IDLER_DB>.secret`           | the generated YABS ingest HMAC key (absent when you set `IDLER_SECRET`); delete to regenerate   |
+| `<IDLER_DB>.pre-NNNN.sqlite`  | written automatically before an upgrade; the rollback copy (see below)                          |
+| `<IDLER_DB>.admin-password`   | first-run only, deleted on the first successful sign-in — a live credential, not a backup item  |
+
+Stop the service, then copy the directory. Snapshots are never pruned on your
+behalf: an upgrade writes `<db>.pre-<version>.sqlite`, where `version` is the
+first migration it is about to apply, and aborts instead of running if that copy
+cannot be made. Delete the snapshots you no longer need.
 
 - Export in the UI (JSON per type or full, CSV zip) or via
   `GET /export/json`. Per-type JSON exports are **partial** — they omit
   related records (pricings/ips/dns/notes/labels/yabs) and are marked
   `"partial": true`; only a full export restores everything.
-- Restore: `idlerthing import [--force] backup.json` — imports the app's own
-  export format. Current exports carry a `"format": 1` envelope marker;
+- Restore: `idlerthing import [--force] backup.json` — the format is detected
+  from the file, so this also takes a my-idlers JSON dump or CSV export. The CSV
+  zip the UI produces is for spreadsheets; it is not the my-idlers CSV shape and
+  will not import. Current exports carry a `"format": 1` envelope marker;
   older backups without one restore as **legacy format** (with a warning),
   while an unrecognized marker is rejected. Catalogs are merged by name;
   services are always inserted fresh, so importing into a non-empty
@@ -205,9 +269,10 @@ JSON/CSV exports do not include the key; restore it separately if needed.
 
 - Early docs showed example admin passwords verbatim. If your deployment
   dates from that era, the server logs a loud warning at startup when the
-  admin password matches one — reset it with `idlerthing passwd` (prints a
-  generated one), supply a new password through the command's standard input,
-  or use **Settings → Account**. Password arguments are rejected because
+  admin password matches one — reset it with **Settings → Account**, or with
+  `idlerthing passwd` when you are locked out (it reads the new password from
+  standard input, and only prints a generated one when attached to a terminal).
+  Password arguments are rejected because
   other local users may be able to see command lines. All sessions and the API
   token are revoked either way.
 
