@@ -189,6 +189,8 @@ JSON/CSV exports do not include the key; restore it separately if needed.
   services are always inserted fresh, so importing into a non-empty
   database requires `--force` (and duplicates services). Users, sessions,
   and settings are never imported.
+- Imported hostnames are limited to 253 bytes. Import diagnostics abbreviate
+  long values and retain at most 1,000 warnings, including a suppression notice.
 
 ## Upgrading
 

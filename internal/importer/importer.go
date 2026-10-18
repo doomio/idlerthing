@@ -140,8 +140,7 @@ func Import(ctx context.Context, db *sql.DB, r io.Reader, force bool) (*Summary,
 
 	imp := &importer{tx: conn, seenIPs: map[string]bool{}}
 	if legacyFormat {
-		imp.sum.Warnings = append(imp.sum.Warnings,
-			"backup predates the format marker — restoring as legacy format")
+		warnf(&imp.sum.Warnings, "%s", "backup predates the format marker — restoring as legacy format")
 	}
 	if err := imp.run(ctx, doc); err != nil {
 		return nil, err
@@ -171,6 +170,9 @@ type importer struct {
 	seenIPs map[string]bool
 }
 
+// run restores one decoded export document into imp.tx in dependency order:
+// catalogs first, then services (with inlined relations), then the
+// remaining top-level relations.
 func (imp *importer) run(ctx context.Context, doc map[string]any) error {
 	imp.catMaps = map[string]map[int64]int64{"labels": {}}
 	imp.ipMaps = map[int64]int64{}
@@ -180,8 +182,7 @@ func (imp *importer) run(ctx context.Context, doc map[string]any) error {
 
 	// Partial (per-type) exports omit the related tables — say so loudly.
 	if partial, _ := doc["partial"].(bool); partial {
-		imp.sum.Warnings = append(imp.sum.Warnings,
-			"partial export: related records (pricings/ips/dns/notes/labels/yabs) were not included and cannot be restored")
+		warnf(&imp.sum.Warnings, "%s", "partial export: related records (pricings/ips/dns/notes/labels/yabs) were not included and cannot be restored")
 	}
 
 	// Catalogs first (dependency order).
@@ -245,8 +246,8 @@ func (imp *importer) run(ctx context.Context, doc map[string]any) error {
 		return err
 	}
 	if imp.catMisses > 0 {
-		imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-			"partial export: catalog associations could not be restored for %d rows", imp.catMisses))
+		warnf(&imp.sum.Warnings,
+			"partial export: catalog associations could not be restored for %d rows", imp.catMisses)
 	}
 	return nil
 }
@@ -322,8 +323,8 @@ func (imp *importer) fixTimestamps(ctx context.Context, table string, id int64, 
 	norm := func(field, v string) string {
 		t, ok := normTimestamp(v)
 		if !ok {
-			imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-				"%s %d: invalid %s %q — keeping the default", table, id, field, v))
+			warnf(&imp.sum.Warnings,
+				"%s %d: invalid %s %q — keeping the default", table, id, field, v)
 			return ""
 		}
 		return t
@@ -378,37 +379,37 @@ func (imp *importer) topLevelPricings(ctx context.Context, doc map[string]any) e
 		pm, _ := item.(map[string]any)
 		serviceType := int(fget(pm, "service_type"))
 		if serviceType < 1 || serviceType > 6 {
-			imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-				"pricing: service_type %d out of range, skipped", serviceType))
+			warnf(&imp.sum.Warnings,
+				"pricing: service_type %d out of range, skipped", serviceType)
 			continue
 		}
 		oldService := int64(fget(pm, "service_id"))
 		newService, ok := imp.idMaps[serviceType][oldService]
 		if !ok {
-			imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-				"pricing: service %d/%d not in document, skipped", serviceType, oldService))
+			warnf(&imp.sum.Warnings,
+				"pricing: service %d/%d not in document, skipped", serviceType, oldService)
 			continue
 		}
 		if !validImportPrice(fget(pm, "price")) {
-			imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-				"pricing: invalid price for service %d, skipped", newService))
+			warnf(&imp.sum.Warnings,
+				"pricing: invalid price for service %d, skipped", newService)
 			continue
 		}
 		cur, ok := normCurrency(sget(pm, "currency"))
 		if !ok {
-			imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-				"pricing: invalid currency %q, skipped", sget(pm, "currency")))
+			warnf(&imp.sum.Warnings,
+				"pricing: invalid currency %q, skipped", sget(pm, "currency"))
 			continue
 		}
 		if term := int64(fget(pm, "term")); term < 1 || term > 7 {
-			imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-				"pricing: term %d out of range for service %d, skipped", term, newService))
+			warnf(&imp.sum.Warnings,
+				"pricing: term %d out of range for service %d, skipped", term, newService)
 			continue
 		}
 		due := sgetN(pm, "next_due_date")
 		if d, ok := normDate(due.String); !ok {
-			imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-				"pricing: invalid next_due_date %q — storing NULL", due.String))
+			warnf(&imp.sum.Warnings,
+				"pricing: invalid next_due_date %q — storing NULL", due.String)
 			due = sql.NullString{}
 		} else if d != "" {
 			due = sql.NullString{String: d, Valid: true}
@@ -456,8 +457,7 @@ func (imp *importer) labelsAssigned(ctx context.Context, doc map[string]any) err
 			continue // label catalog row not in this document
 		}
 		if serviceType < 1 || serviceType > 6 {
-			imp.sum.Warnings = append(imp.sum.Warnings,
-				fmt.Sprintf("label assignment: service_type %d out of range, skipped", serviceType))
+			warnf(&imp.sum.Warnings, "label assignment: service_type %d out of range, skipped", serviceType)
 			continue
 		}
 		newService, ok := imp.idMaps[serviceType][oldService]
@@ -488,9 +488,13 @@ func (imp *importer) labelsAssigned(ctx context.Context, doc map[string]any) err
 // The field is trimmed in place so the insert stores the trimmed value.
 func (imp *importer) requireName(m map[string]any, key, what string) bool {
 	v := strings.TrimSpace(sget(m, key))
+	if key == "hostname" && len(v) > maxImportHostnameBytes {
+		warnf(&imp.sum.Warnings, "%s: hostname exceeds %d bytes, skipped", what, maxImportHostnameBytes)
+		return false
+	}
 	if v == "" {
-		imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-			"%s: missing %s, skipped", what, key))
+		warnf(&imp.sum.Warnings,
+			"%s: missing %s, skipped", what, key)
 		return false
 	}
 	m[key] = v
@@ -499,21 +503,25 @@ func (imp *importer) requireName(m map[string]any, key, what string) bool {
 
 // ---------- decode helpers ----------
 
+// arr returns the array-valued field key of doc (nil when absent or not an array).
 func arr(doc map[string]any, key string) []any {
 	v, _ := doc[key].([]any)
 	return v
 }
 
+// mget returns the object-valued field key of m (nil when absent or not an object).
 func mget(m map[string]any, key string) map[string]any {
 	v, _ := m[key].(map[string]any)
 	return v
 }
 
+// sget returns the string-valued field key of m ("" when absent or not a string).
 func sget(m map[string]any, key string) string {
 	v, _ := m[key].(string)
 	return v
 }
 
+// sgetN returns the string-valued field key of m as a NullString (invalid when blank).
 func sgetN(m map[string]any, key string) sql.NullString {
 	v := sget(m, key)
 	if v == "" {
@@ -522,6 +530,8 @@ func sgetN(m map[string]any, key string) sql.NullString {
 	return sql.NullString{String: v, Valid: true}
 }
 
+// nget returns the numeric field key of m as a NullInt64 (invalid when
+// absent, not a number, or outside the safe int64 range).
 func nget(m map[string]any, key string) sql.NullInt64 {
 	v, ok := m[key].(float64)
 	if !ok {
@@ -535,16 +545,19 @@ func nget(m map[string]any, key string) sql.NullInt64 {
 	return sql.NullInt64{Int64: int64(v), Valid: true}
 }
 
+// bget returns the bool-valued field key of m (false when absent or not a bool).
 func bget(m map[string]any, key string) bool {
 	v, _ := m[key].(bool)
 	return v
 }
 
+// fget returns the numeric field key of m as a float64 (0 when absent or not a number).
 func fget(m map[string]any, key string) float64 {
 	v, _ := m[key].(float64)
 	return v
 }
 
+// bint converts a bool to the 0/1 ints the schema stores booleans as.
 func bint(b bool) int {
 	if b {
 		return 1
@@ -578,8 +591,8 @@ func (imp *importer) catalog(ctx context.Context, doc map[string]any, key, table
 		var existing string
 		if err := imp.tx.QueryRowContext(ctx,
 			"SELECT "+nameCol+" FROM "+table+" WHERE "+nameCol+" = ? COLLATE NOCASE", name).Scan(&existing); err == nil && existing != name {
-			imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-				"catalog %s: %q merged into existing %q", table, name, existing))
+			warnf(&imp.sum.Warnings,
+				"catalog %s: %q merged into existing %q", table, name, existing)
 		}
 		newID, created, err := getOrCreateCatalogTx(ctx, imp.tx, table, nameCol, name)
 		if err != nil {
@@ -639,8 +652,8 @@ func (imp *importer) normOwned(v sql.NullString, serviceName string) sql.NullStr
 	if d, ok := normDate(v.String); ok {
 		return sql.NullString{String: d, Valid: d != ""}
 	}
-	imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-		"%s: invalid owned_since %q — storing NULL", serviceName, v.String))
+	warnf(&imp.sum.Warnings,
+		"%s: invalid owned_since %q — storing NULL", serviceName, v.String)
 	return sql.NullString{}
 }
 
@@ -651,24 +664,24 @@ func (imp *importer) insertPricing(ctx context.Context, pm map[string]any, servi
 	}
 	cur, ok := normCurrency(sget(pm, "currency"))
 	if !ok {
-		imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-			"pricing: invalid currency %q for service %d, skipped", sget(pm, "currency"), serviceID))
+		warnf(&imp.sum.Warnings,
+			"pricing: invalid currency %q for service %d, skipped", sget(pm, "currency"), serviceID)
 		return nil
 	}
 	if !validImportPrice(fget(pm, "price")) {
-		imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-			"pricing: invalid price for service %d, skipped", serviceID))
+		warnf(&imp.sum.Warnings,
+			"pricing: invalid price for service %d, skipped", serviceID)
 		return nil
 	}
 	if term := int64(fget(pm, "term")); term < 1 || term > 7 {
-		imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-			"pricing: term %d out of range for service %d, skipped", term, serviceID))
+		warnf(&imp.sum.Warnings,
+			"pricing: term %d out of range for service %d, skipped", term, serviceID)
 		return nil
 	}
 	due := sgetN(pm, "next_due_date")
 	if d, ok := normDate(due.String); !ok {
-		imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-			"pricing: invalid next_due_date %q for service %d — storing NULL", due.String, serviceID))
+		warnf(&imp.sum.Warnings,
+			"pricing: invalid next_due_date %q for service %d — storing NULL", due.String, serviceID)
 		due = sql.NullString{}
 	} else if d != "" {
 		due = sql.NullString{String: d, Valid: true}
@@ -691,8 +704,8 @@ func (imp *importer) boundedInt(v sql.NullInt64, max int64, field, host string) 
 		return v
 	}
 	if v.Int64 < 0 || v.Int64 > max {
-		imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-			"server %q: %s %d out of range — storing NULL", host, field, v.Int64))
+		warnf(&imp.sum.Warnings,
+			"server %q: %s %d out of range — storing NULL", host, field, v.Int64)
 		return sql.NullInt64{}
 	}
 	return v
@@ -700,6 +713,7 @@ func (imp *importer) boundedInt(v sql.NullInt64, max int64, field, host string) 
 
 // ---------- servers ----------
 
+// servers imports the top-level "servers" array, one {"server": ...} item at a time.
 func (imp *importer) servers(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "servers") {
 		it, _ := item.(map[string]any)
@@ -751,8 +765,8 @@ func (imp *importer) importServer(ctx context.Context, it, s map[string]any) err
 func (imp *importer) insertServerRow(ctx context.Context, s map[string]any) (int64, error) {
 	serverType := int64(fget(s, "server_type"))
 	if serverType < model.TypeKVM || serverType > model.TypeNAT {
-		imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-			"server %q: server_type %d out of range — storing %d (KVM)", sget(s, "hostname"), serverType, model.TypeKVM))
+		warnf(&imp.sum.Warnings,
+			"server %q: server_type %d out of range — storing %d (KVM)", sget(s, "hostname"), serverType, model.TypeKVM)
 		serverType = model.TypeKVM
 	}
 	res, err := imp.tx.ExecContext(ctx, `
@@ -791,8 +805,8 @@ func (imp *importer) insertServerDisks(ctx context.Context, it, s map[string]any
 		case "":
 			media = "SSD"
 		default:
-			imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-				"server %q: invalid disk media %q — storing SSD", sget(s, "hostname"), media))
+			warnf(&imp.sum.Warnings,
+				"server %q: invalid disk media %q — storing SSD", sget(s, "hostname"), media)
 			media = "SSD"
 		}
 		if _, err := imp.tx.ExecContext(ctx,
@@ -844,8 +858,8 @@ func (imp *importer) insertIP(ctx context.Context, im map[string]any, serviceID 
 	}
 	parsed, err := netip.ParseAddr(raw)
 	if err != nil {
-		imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-			"ip %q: invalid address, skipped", raw))
+		warnf(&imp.sum.Warnings,
+			"ip %q: invalid address, skipped", raw)
 		return nil
 	}
 	addr := parsed.String()
@@ -892,13 +906,14 @@ type hostingSpec struct {
 	count       *int
 }
 
+// hosting imports one shared/reseller hosting array per spec, with inlined pricing.
 func (imp *importer) hosting(ctx context.Context, doc map[string]any, spec hostingSpec) error {
 	for _, item := range arr(doc, spec.docKey) {
 		it, _ := item.(map[string]any)
 		h := mget(it, spec.entityKey)
 		if h == nil {
-			imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-				"%s: item without a %q object, skipped", spec.docKey, spec.entityKey))
+			warnf(&imp.sum.Warnings,
+				"%s: item without a %q object, skipped", spec.docKey, spec.entityKey)
 			continue
 		}
 		if !imp.requireName(h, "main_domain", spec.docKey) {
@@ -943,6 +958,7 @@ func (imp *importer) hosting(ctx context.Context, doc map[string]any, spec hosti
 
 // ---------- seedboxes ----------
 
+// seedboxes imports the top-level "seedboxes" array, with inlined pricing.
 func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "seedboxes") {
 		it, _ := item.(map[string]any)
@@ -985,6 +1001,7 @@ func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 
 // ---------- domains ----------
 
+// domains imports the top-level "domains" array, with inlined pricing.
 func (imp *importer) domains(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "domains") {
 		it, _ := item.(map[string]any)
@@ -1021,6 +1038,7 @@ func (imp *importer) domains(ctx context.Context, doc map[string]any) error {
 
 // ---------- misc ----------
 
+// misc imports the top-level "misc" array, with inlined pricing.
 func (imp *importer) misc(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "misc") {
 		it, _ := item.(map[string]any)
@@ -1054,6 +1072,7 @@ func (imp *importer) misc(ctx context.Context, doc map[string]any) error {
 
 // ---------- labels / ips / dns / notes ----------
 
+// labels get-or-creates the top-level "labels" catalog and builds the old→new id map.
 func (imp *importer) labels(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "labels") {
 		it, _ := item.(map[string]any)
@@ -1090,8 +1109,7 @@ func (imp *importer) ips(ctx context.Context, doc map[string]any) error {
 		}
 		serviceType := int(fget(im, "service_type"))
 		if serviceType < 1 || serviceType > 6 {
-			imp.sum.Warnings = append(imp.sum.Warnings,
-				fmt.Sprintf("ip %q: service_type %d out of range, skipped", sget(im, "address"), serviceType))
+			warnf(&imp.sum.Warnings, "ip %q: service_type %d out of range, skipped", sget(im, "address"), serviceType)
 			continue
 		}
 		oldService := int64(fget(im, "service_id"))
@@ -1106,6 +1124,8 @@ func (imp *importer) ips(ctx context.Context, doc map[string]any) error {
 	return nil
 }
 
+// dns imports the top-level "dns" array, remapping each parent reference
+// through the matching service id map.
 func (imp *importer) dns(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "dns") {
 		it, _ := item.(map[string]any)
@@ -1124,8 +1144,8 @@ func (imp *importer) dns(ctx context.Context, doc map[string]any) error {
 			if newID, ok := imp.idMaps[serviceType][old.Int64]; ok {
 				return sql.NullInt64{Int64: newID, Valid: true}
 			}
-			imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-				"dns %q: parent %s=%d not in document — storing NULL", sget(d, "hostname"), key, old.Int64))
+			warnf(&imp.sum.Warnings,
+				"dns %q: parent %s=%d not in document — storing NULL", sget(d, "hostname"), key, old.Int64)
 			return sql.NullInt64{}
 		}
 		dnsType := sget(d, "dns_type")
@@ -1140,8 +1160,8 @@ func (imp *importer) dns(ctx context.Context, doc map[string]any) error {
 				}
 			}
 			if !valid {
-				imp.sum.Warnings = append(imp.sum.Warnings, fmt.Sprintf(
-					"dns %q: invalid dns_type %q — storing A", sget(d, "hostname"), dnsType))
+				warnf(&imp.sum.Warnings,
+					"dns %q: invalid dns_type %q — storing A", sget(d, "hostname"), dnsType)
 				dnsType = "A"
 			}
 		}
@@ -1161,6 +1181,8 @@ func (imp *importer) dns(ctx context.Context, doc map[string]any) error {
 	return nil
 }
 
+// notes imports the top-level "notes" array, remapped through either the ip
+// id map (ip-keyed notes) or the matching service id map.
 func (imp *importer) notes(ctx context.Context, doc map[string]any) error {
 	for _, item := range arr(doc, "notes") {
 		it, _ := item.(map[string]any)
@@ -1194,8 +1216,7 @@ func (imp *importer) notes(ctx context.Context, doc map[string]any) error {
 		}
 		serviceType := int(fget(n, "service_type"))
 		if serviceType < 1 || serviceType > 6 {
-			imp.sum.Warnings = append(imp.sum.Warnings,
-				fmt.Sprintf("note: service_type %d out of range, skipped", serviceType))
+			warnf(&imp.sum.Warnings, "note: service_type %d out of range, skipped", serviceType)
 			continue
 		}
 		oldService := nget(n, "service_id")

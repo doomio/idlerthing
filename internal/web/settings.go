@@ -19,6 +19,7 @@ package web
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -217,11 +218,21 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, u *user)
 		return
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(r.Context(),
+	res, err := tx.ExecContext(r.Context(),
 		`UPDATE users SET password_hash = ?, api_token_hash = NULL,
-			updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-		string(newHash), u.ID); err != nil {
+			updated_at = CURRENT_TIMESTAMP WHERE id = ? AND password_hash = ?`,
+		string(newHash), u.ID, hash)
+	if err != nil {
 		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
+		return
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
+		return
+	}
+	if rows != 1 {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 	// Invalidate ALL sessions for the user — including the current one,
@@ -236,7 +247,11 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, u *user)
 		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
 		return
 	}
-	if err := s.createSession(w, r, u.ID); err != nil {
+	if err := s.createSession(w, r, u.ID, string(newHash)); err != nil {
+		if errors.Is(err, errCredentialsChanged) {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
 		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
 		return
 	}
@@ -297,6 +312,7 @@ func validCurrency(code string) string {
 	return "USD"
 }
 
+// boolToIntWeb converts a bool to the 0/1 ints the settings columns store.
 func boolToIntWeb(b bool) int {
 	if b {
 		return 1
