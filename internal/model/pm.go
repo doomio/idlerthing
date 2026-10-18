@@ -80,7 +80,17 @@ func (st *PMStore) Replace(ctx context.Context, providerID int64, services []PMS
 		return fmt.Errorf("begin pm_services replace: %w", err)
 	}
 	defer tx.Rollback()
+	if err := st.ReplaceTx(ctx, tx, providerID, services); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+// ReplaceTx swaps a provider's cached services inside a transaction the caller
+// owns. A sync uses this so the cache and the inventory it reconciles commit
+// together: a half-applied sync would look like a human edit to the next one
+// and strand the value it failed to write.
+func (st *PMStore) ReplaceTx(ctx context.Context, tx *sql.Tx, providerID int64, services []PMService) error {
 	if _, err := tx.ExecContext(ctx,
 		"DELETE FROM pm_services WHERE provider_id = ?", providerID); err != nil {
 		return fmt.Errorf("clear pm_services: %w", err)
@@ -105,7 +115,7 @@ func (st *PMStore) Replace(ctx context.Context, providerID int64, services []PMS
 			}
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // List returns one provider's cached services, ordered by service id.
@@ -132,4 +142,47 @@ func (st *PMStore) List(ctx context.Context, providerID int64) ([]PMService, err
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+// PMLink is a seedbox linked to one of a provider's feed services, with the
+// inventory values a sync has to merge against.
+type PMLink struct {
+	SeedboxID int64
+	ServiceID int64
+	DiskAsMB  sql.NullInt64 // NULL when the user has set no size
+}
+
+// LinkedSeedboxesTx lists the seedboxes of a provider that are linked to a
+// feed service. Unlinked seedboxes are not the sync's business.
+func LinkedSeedboxesTx(ctx context.Context, tx *sql.Tx, providerID int64) ([]PMLink, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, pm_service_id, disk_as_mb FROM seedboxes
+		WHERE provider_id = ? AND pm_service_id IS NOT NULL
+		ORDER BY id`, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("list linked seedboxes: %w", err)
+	}
+	defer rows.Close()
+
+	var out []PMLink
+	for rows.Next() {
+		var l PMLink
+		if err := rows.Scan(&l.SeedboxID, &l.ServiceID, &l.DiskAsMB); err != nil {
+			return nil, fmt.Errorf("scan linked seedbox: %w", err)
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// SetSeedboxDiskTx writes only the disk size of a seedbox. It is a narrow
+// write on purpose: a sync must not touch the rest of a user's seedbox row.
+func SetSeedboxDiskTx(ctx context.Context, tx *sql.Tx, seedboxID, diskMB int64) error {
+	_, err := tx.ExecContext(ctx,
+		"UPDATE seedboxes SET disk_as_mb = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		diskMB, seedboxID)
+	if err != nil {
+		return fmt.Errorf("set seedbox disk: %w", err)
+	}
+	return nil
 }
