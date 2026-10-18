@@ -57,10 +57,10 @@ func (s *Server) newCatalogView(r *http.Request, kindStr string, kind model.Cata
 	if kindStr == "providers" {
 		view.ShowKeys = true
 		view.HasKey = map[int64]bool{}
-		ids, err := (&model.CatalogStore{DB: s.db}).ProviderIDsWithKey(r.Context())
+		providers, err := (&model.CatalogStore{DB: s.db}).ProvidersWithKey(r.Context())
 		if err == nil {
-			for _, id := range ids {
-				view.HasKey[id] = true
+			for _, p := range providers {
+				view.HasKey[p.ID] = true
 			}
 		}
 	}

@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -163,6 +164,12 @@ func reconcile(ctx context.Context, tx *sql.Tx, link model.PMLink, prev model.PM
 		if err := reconcilePricing(ctx, tx, link, prev, next, term); err != nil {
 			return err
 		}
+	} else {
+		// Debug: an operator staring at a box with no price is the audience,
+		// and a fleet with hundreds of odd-cycle services must not fill the
+		// journal at Info level.
+		slog.Debug("billing cycle has no term mapping; price left alone",
+			"seedbox", link.SeedboxID, "service", next.ServiceID, "cycle", next.BillingCycle)
 	}
 
 	return reconcileDisk(ctx, tx, link, prev, hadPrev, next)

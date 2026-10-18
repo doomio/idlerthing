@@ -25,6 +25,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       {{if $v.SyncedAt}}synced {{$v.SyncedAt}}{{else}}never synced{{end}}
       {{if $v.Stale}}<span class="badge badge-warn">stale</span>{{end}}
     </div>
+    {{if $v.RatesNote}}<div class="page-sub">{{$v.RatesNote}}</div>{{end}}
   </div>
   <div class="fleet-actions">
     <div class="fleet-secondary-actions">

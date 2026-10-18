@@ -112,22 +112,30 @@ func (s *CatalogStore) HasProviderKey(ctx context.Context, id int64) (bool, erro
 	return n > 0, err
 }
 
-// ProviderIDsWithKey lists providers that hold a key — the ones a sync should
+// ProviderWithKey names a provider that holds an API key. The key is never
+// part of it — callers fetch that separately, and a failure has to be
+// attributable to a provider by name.
+type ProviderWithKey struct {
+	ID   int64
+	Name string
+}
+
+// ProvidersWithKey lists the providers that hold a key — the ones a sync should
 // fetch. It never returns the keys themselves.
-func (s *CatalogStore) ProviderIDsWithKey(ctx context.Context) ([]int64, error) {
+func (s *CatalogStore) ProvidersWithKey(ctx context.Context) ([]ProviderWithKey, error) {
 	rows, err := QuerierFrom(ctx, s.DB).QueryContext(ctx,
-		"SELECT id FROM providers WHERE pm_api_key <> '' ORDER BY id")
+		"SELECT id, name FROM providers WHERE pm_api_key <> '' ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []int64
+	var out []ProviderWithKey
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var p ProviderWithKey
+		if err := rows.Scan(&p.ID, &p.Name); err != nil {
 			return nil, err
 		}
-		out = append(out, id)
+		out = append(out, p)
 	}
 	return out, rows.Err()
 }

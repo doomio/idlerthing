@@ -299,3 +299,86 @@ func TestFleetSyncRequiresCSRF(t *testing.T) {
 		t.Fatalf("a CSRF-less sync must be rejected, got %d", resp.StatusCode)
 	}
 }
+
+// A transport failure must be reported as a failure — not as "the feed listed
+// no services", which is what a discarded error used to produce because the
+// fetch left the synced counter at zero. The cached rows also have to survive:
+// one bad sync must not blank the fleet page.
+func TestFleetSyncReportsTransportFailure(t *testing.T) {
+	ts, database, srv := newTestServerFull(t)
+	fleetFixture(t, database)
+
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(feed.Close)
+	srv.pmapiURL = feed.URL
+
+	before := pmServiceCount(t, database)
+	client := authedClient(t, ts)
+	resp := postForm(t, client, ts, "/seedboxes/fleet/sync", url.Values{})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("sync: status %d", resp.StatusCode)
+	}
+	body := fleetFlash(t, client, ts)
+
+	if !strings.Contains(body, "Every provider failed to sync") {
+		t.Errorf("flash did not report the failed sync; flash: %s", body)
+	}
+	if strings.Contains(body, "listed no services") {
+		t.Error("a transport failure must not be reported as an empty feed")
+	}
+	if got := pmServiceCount(t, database); got != before {
+		t.Errorf("a failed sync destroyed the cache: %d rows -> %d", before, got)
+	}
+}
+
+// A rejected key is a different fix than a network failure, and the operator
+// only learns which one to go fix if the flash says so.
+func TestFleetSyncNamesRejectedKey(t *testing.T) {
+	ts, database, srv := newTestServerFull(t)
+	fleetFixture(t, database)
+
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusUnauthorized)
+	}))
+	t.Cleanup(feed.Close)
+	srv.pmapiURL = feed.URL
+
+	client := authedClient(t, ts)
+	resp := postForm(t, client, ts, "/seedboxes/fleet/sync", url.Values{})
+	resp.Body.Close()
+	body := fleetFlash(t, client, ts)
+
+	if !strings.Contains(body, "API key was rejected") {
+		t.Errorf("flash should point at the key; flash: %s", body)
+	}
+	assertNoKey(t, "the sync flash", body, testProviderKey)
+}
+
+func pmServiceCount(t *testing.T, database *sql.DB) int {
+	t.Helper()
+	var n int
+	if err := database.QueryRow("SELECT COUNT(*) FROM pm_services").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// fleetFlash follows a sync's redirect and returns the rendered flash text.
+func fleetFlash(t *testing.T, client *http.Client, ts *httptest.Server) string {
+	t.Helper()
+	resp, err := client.Get(ts.URL + "/seedboxes/fleet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	if i := strings.Index(body, `<div class="flash`); i >= 0 {
+		if j := strings.Index(body[i:], "</div>"); j >= 0 {
+			return body[i : i+j]
+		}
+	}
+	return "(no flash rendered)"
+}

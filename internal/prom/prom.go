@@ -20,12 +20,15 @@ package prom
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,8 +45,58 @@ type Client struct {
 func New(baseURL string) *Client {
 	return &Client{
 		BaseURL:    baseURL,
-		HTTPClient: &http.Client{Timeout: 5 * time.Second},
+		HTTPClient: defaultClient(baseURL),
 	}
+}
+
+// defaultClient is the client used when the caller did not inject one.
+// Redirects must stay on the configured origin: the query string carries
+// PromQL (which names internal scrape targets), and a base URL that reaches
+// Prometheus through HTTP basic auth (https://user:pass@host) would otherwise
+// hand both the credential and the query to whatever host answers a redirect.
+func defaultClient(baseURL string) *http.Client {
+	hc := &http.Client{Timeout: 5 * time.Second}
+	origin, err := url.Parse(baseURL)
+	if err != nil || origin.Host == "" {
+		return hc
+	}
+	hc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req.URL.Host != origin.Host || req.URL.Scheme != origin.Scheme {
+			return fmt.Errorf("redirect to %s://%s refused; endpoint is %s://%s",
+				req.URL.Scheme, req.URL.Host, origin.Scheme, origin.Host)
+		}
+		if len(via) >= 5 {
+			return errors.New("too many redirects")
+		}
+		return nil
+	}
+	return hc
+}
+
+// transportError reduces a client transport failure to a display-safe error.
+// A *url.Error prints the whole request URL first, so returning it verbatim
+// would put an operator's basic-auth credential into the log and the settings
+// flash; the unwrapped cause still says what happened (DNS, refused, timeout).
+func transportError(baseURL string, err error) error {
+	host := "endpoint"
+	if u, uerr := url.Parse(baseURL); uerr == nil && u.Host != "" {
+		host = u.Host
+	}
+	var ue *url.Error
+	cause := err
+	if errors.As(err, &ue) && ue.Err != nil {
+		cause = ue.Err
+	}
+	return fmt.Errorf("connect to %s: %w", host, cause)
+}
+
+// clip bounds a remote server's error text for display.
+func clip(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) > n {
+		return s[:n] + "…"
+	}
+	return s
 }
 
 // Sample is one instant-vector result: metric labels + value.
@@ -69,7 +122,7 @@ type queryResponse struct {
 func (c *Client) Query(ctx context.Context, promql string) ([]Sample, error) {
 	hc := c.HTTPClient
 	if hc == nil {
-		hc = &http.Client{Timeout: 5 * time.Second}
+		hc = defaultClient(c.BaseURL)
 	}
 	u := c.BaseURL + "/api/v1/query?query=" + url.QueryEscape(promql)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -78,7 +131,7 @@ func (c *Client) Query(ctx context.Context, promql string) ([]Sample, error) {
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, transportError(c.BaseURL, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -93,7 +146,7 @@ func (c *Client) Query(ctx context.Context, promql string) ([]Sample, error) {
 		if msg == "" {
 			msg = body.Status
 		}
-		return nil, fmt.Errorf("query failed: %s", msg)
+		return nil, fmt.Errorf("query failed: %s", clip(msg, 200))
 	}
 	var out []Sample
 	for _, r := range body.Data.Result {
@@ -153,12 +206,18 @@ var serverQueries = map[string]string{
 	"uptime": `avg_over_time(up[30d:15m]) * 100`,
 }
 
-// queryBatch runs queries with bounded parallelism (3 in flight).
-func (c *Client) queryBatch(ctx context.Context, queries map[string]string) map[string][]Sample {
+// queryBatch runs queries with bounded parallelism (3 in flight). Individual
+// failures are tolerated — whatever answered is returned — but the first error
+// comes back with the counts so a caller can say WHY a batch came up thin.
+// Without that, an unreachable Prometheus is indistinguishable from a server
+// that exports nothing.
+func (c *Client) queryBatch(ctx context.Context, queries map[string]string) (map[string][]Sample, error) {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 3)
 	var mu sync.Mutex
 	out := map[string][]Sample{}
+	var firstErr error
+	failed := 0
 	for key, ql := range queries {
 		wg.Add(1)
 		sem <- struct{}{}
@@ -167,6 +226,12 @@ func (c *Client) queryBatch(ctx context.Context, queries map[string]string) map[
 			defer func() { <-sem }()
 			samples, err := c.Query(ctx, ql)
 			if err != nil {
+				mu.Lock()
+				failed++
+				if firstErr == nil {
+					firstErr = fmt.Errorf("%s: %w", key, err)
+				}
+				mu.Unlock()
 				return // tolerate
 			}
 			mu.Lock()
@@ -175,7 +240,10 @@ func (c *Client) queryBatch(ctx context.Context, queries map[string]string) map[
 		}(key, ql)
 	}
 	wg.Wait()
-	return out
+	if firstErr != nil {
+		firstErr = fmt.Errorf("%w (%d of %d queries failed)", firstErr, failed, len(queries))
+	}
+	return out, firstErr
 }
 
 // ServerMetrics batch-fetches all host metrics in parallel (shared 8s
@@ -202,7 +270,12 @@ func (c *Client) ServerMetrics(ctx context.Context) *Metrics {
 		return h
 	}
 
-	results := c.queryBatch(ctx, serverQueries)
+	results, batchErr := c.queryBatch(ctx, serverQueries)
+	if batchErr != nil {
+		// Once per batch at most: the web layer caches and backs off, so a
+		// dead endpoint logs every 30s rather than on every page render.
+		slog.Warn("prometheus query batch failed", "endpoint", c.BaseURL, "err", batchErr)
+	}
 
 	apply := func(key string, fn func(Sample)) {
 		samples, ok := results[key]

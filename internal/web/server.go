@@ -27,6 +27,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"idlerthing/internal/model"
@@ -76,6 +77,13 @@ type Server struct {
 	// pmapiURL overrides the PulsedMedia feed endpoint (IDLER_PMAPI_URL).
 	// Empty uses the built-in URL; tests point it at a mock server.
 	pmapiURL string
+
+	// pmSyncing serialises fleet syncs so a burst of clicks cannot launch
+	// several fetches at once (the provider rate-limits by key). Per-Server
+	// like every other mutable state here — package globals would let one
+	// test's in-flight sync block an unrelated Server in another.
+	pmSyncMu  sync.Mutex
+	pmSyncing bool
 
 	// AGPL §13 texts, injected from package main (go:embed cannot reach the
 	// repo root from here) — see legal.go.

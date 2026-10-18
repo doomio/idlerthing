@@ -186,7 +186,7 @@ func TestProviderKeyRoundTrip(t *testing.T) {
 	}
 }
 
-func TestProviderIDsWithKey(t *testing.T) {
+func TestProvidersWithKey(t *testing.T) {
 	database := testDB(t)
 	ctx := context.Background()
 	st := &CatalogStore{DB: database}
@@ -202,12 +202,16 @@ func TestProviderIDsWithKey(t *testing.T) {
 		t.Fatalf("SetProviderKey: %v", err)
 	}
 
-	ids, err := st.ProviderIDsWithKey(ctx)
+	providers, err := st.ProvidersWithKey(ctx)
 	if err != nil {
-		t.Fatalf("ProviderIDsWithKey: %v", err)
+		t.Fatalf("ProvidersWithKey: %v", err)
 	}
-	if len(ids) != 1 || ids[0] != withKey {
-		t.Fatalf("want exactly the keyed provider, got %v", ids)
+	if len(providers) != 1 || providers[0].ID != withKey {
+		t.Fatalf("want exactly the keyed provider, got %v", providers)
+	}
+	// The name is what makes a sync failure attributable.
+	if providers[0].Name != "Has Key" {
+		t.Errorf("provider name = %q, want %q", providers[0].Name, "Has Key")
 	}
 }
 
