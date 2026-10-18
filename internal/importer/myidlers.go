@@ -928,6 +928,7 @@ func getOrCreateCatalogTx(ctx context.Context, tx dbtx, table, nameCol, name str
 	return id, true, err
 }
 
+// nullInt64 converts an optional int64 pointer to a NullInt64 (invalid when nil).
 func nullInt64(v *int64) sql.NullInt64 {
 	if v == nil {
 		return sql.NullInt64{}
@@ -935,6 +936,7 @@ func nullInt64(v *int64) sql.NullInt64 {
 	return sql.NullInt64{Int64: *v, Valid: true}
 }
 
+// nullStr converts a string to a NullString (invalid when empty).
 func nullStr(s string) sql.NullString {
 	if s == "" {
 		return sql.NullString{}

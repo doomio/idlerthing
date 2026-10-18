@@ -216,10 +216,12 @@ func (s *CatalogStore) UsageCount(ctx context.Context, kind CatalogKind, id int6
 	return total, nil
 }
 
-// Delete removes a catalog item. It refuses (ErrInUse) when any service
-// still references it.
+// ErrInUse is returned by Delete when a catalog entry is still referenced
+// by at least one service.
 var ErrInUse = fmt.Errorf("catalog entry in use")
 
+// Delete removes a catalog item, refusing (ErrInUse) when any service
+// still references it.
 func (s *CatalogStore) Delete(ctx context.Context, kind CatalogKind, id int64) error {
 	// Usage check + delete in ONE transaction — no TOCTOU race — with the
 	// FK constraint error mapped to a clean ErrInUse as a second line of

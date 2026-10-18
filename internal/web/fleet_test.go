@@ -126,13 +126,52 @@ func TestFleetUsagePresentation(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body := readBody(t, resp)
-	for _, label := range []string{"Storage used", "Traffic sent", "Traffic received", "Disk usage", "w5", "periods may differ by box"} {
+	for _, label := range []string{"Storage used", "Traffic sent", "Traffic received", "Disk usage", "periods may differ by box"} {
 		if !strings.Contains(body, label) {
 			t.Errorf("fleet missing %q", label)
 		}
 	}
 	if strings.Contains(body, "style=\"width:") {
 		t.Error("fleet meter must use the existing CSP-safe width classes")
+	}
+}
+
+func TestFleetUsesEditedInventoryQuota(t *testing.T) {
+	svc := model.PMService{DiskUsedBytes: 2 * 1024 * 1024 * 1024, DiskQuotaBytes: 8 * 1024 * 1024 * 1024}
+	box := buildFleetBox("box.example.net", svc, sql.NullInt64{Int64: 4 * 1024, Valid: true}, "", 0)
+	if box.DiskQuotaMB != 4*1024 || box.DiskPct != 50 {
+		t.Fatalf("fleet ignored inventory quota: quota=%d pct=%d", box.DiskQuotaMB, box.DiskPct)
+	}
+}
+
+func TestFleetRowsKeepRawMonthlyAmount(t *testing.T) {
+	_, database, srv := newTestServerFull(t)
+	provider := fleetFixtureRates(t, database, srv)
+	if _, err := database.Exec(`UPDATE pricings SET currency = 'USD', price = 0.005, term = ?
+		WHERE service_type = ? AND service_id IN (SELECT id FROM seedboxes WHERE provider_id = ? AND pm_service_id = 101)`,
+		model.TermMonthly, model.ServiceSeedbox, provider); err != nil {
+		t.Fatal(err)
+	}
+	services, err := (&model.PMStore{DB: database}).List(t.Context(), provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := srv.fleetRows(httptest.NewRequest(http.MethodGet, "/seedboxes/fleet", nil), provider, services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].MonthlyUSD != 0.005 || fleetTiles(rows).MonthlyUSD != 0.005 {
+		t.Fatalf("fleet rounded before summing: %+v", rows)
+	}
+}
+
+func TestFleetMonthlyTotalUsesUnroundedAmounts(t *testing.T) {
+	boxes := []fleetBox{
+		{Monthly: "$0.01", MonthlyUSD: 0.005},
+		{Monthly: "$0.01", MonthlyUSD: 0.005},
+	}
+	if got := fleetTiles(boxes).MonthlyUSD; got != 0.01 {
+		t.Fatalf("monthly total = %v, want 0.01 before display rounding", got)
 	}
 }
 

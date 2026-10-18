@@ -56,6 +56,7 @@ func (v listNav) SortClass(col string) string {
 	return ""
 }
 
+// queryString builds the list URL for sort/dir, preserving status and search.
 func (v listNav) queryString(sort, dir string) string {
 	q := "status=" + v.Status
 	if v.Q != "" {

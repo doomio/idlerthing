@@ -55,8 +55,9 @@ type fleetBox struct {
 	CPUHours   int64
 	Torrents   int64
 
-	NextDue string
-	Monthly string
+	NextDue    string
+	Monthly    string
+	MonthlyUSD float64
 }
 
 // fleetTotals are the headline tiles. They count active services only: a
@@ -183,12 +184,12 @@ func (s *Server) fleetRows(r *http.Request, providerID int64, services []model.P
 		if !pulsedmedia.IsActive(svc.Status) && !isCancelledRequest(r) {
 			continue
 		}
-		risk, _ := pricing.MonthlyUSD(&model.Pricing{
+		monthlyUSD, _ := pricing.MonthlyUSDRaw(&model.Pricing{
 			Currency: currency.String,
 			Price:    price.Float64,
 			Term:     int(term.Int64),
 		}, rates)
-		out = append(out, buildFleetBox(hostname, svc, diskMB, due.String, risk))
+		out = append(out, buildFleetBox(hostname, svc, diskMB, due.String, monthlyUSD))
 	}
 	return out, rows.Err()
 }
@@ -196,24 +197,28 @@ func (s *Server) fleetRows(r *http.Request, providerID int64, services []model.P
 // buildFleetBox renders one box from its cached service and inventory values.
 func buildFleetBox(hostname string, svc model.PMService, diskMB sql.NullInt64, due string, monthlyUSD float64) fleetBox {
 	box := fleetBox{
-		Hostname:    hostname,
-		Product:     svc.Product,
-		Status:      svc.Status,
-		Cancelled:   !pulsedmedia.IsActive(svc.Status),
-		DiskUsedMB:  svc.DiskUsedBytes / (1024 * 1024),
-		DiskQuotaMB: svc.DiskQuotaBytes / (1024 * 1024),
-		Sent:        fmtMB(svc.SentBytes / (1024 * 1024)),
-		Received:    fmtMB(svc.ReceivedBytes / (1024 * 1024)),
-		SentMB:      svc.SentBytes / (1024 * 1024),
-		ReceivedMB:  svc.ReceivedBytes / (1024 * 1024),
-		CPUHours:    svc.CPUHours,
-		Torrents:    svc.Torrents,
+		Hostname:   hostname,
+		Product:    svc.Product,
+		Status:     svc.Status,
+		Cancelled:  !pulsedmedia.IsActive(svc.Status),
+		DiskUsedMB: svc.DiskUsedBytes / (1024 * 1024),
+		Sent:       fmtMB(svc.SentBytes / (1024 * 1024)),
+		Received:   fmtMB(svc.ReceivedBytes / (1024 * 1024)),
+		SentMB:     svc.SentBytes / (1024 * 1024),
+		ReceivedMB: svc.ReceivedBytes / (1024 * 1024),
+		CPUHours:   svc.CPUHours,
+		Torrents:   svc.Torrents,
+		MonthlyUSD: monthlyUSD,
 	}
+
 	// The inventory's due date wins when set: it is what the rest of the app
 	// shows, and the sync already applied the precedence rule to it.
 	box.NextDue = due
 	if box.NextDue == "" {
 		box.NextDue = svc.NextDue
+	}
+	if diskMB.Valid {
+		box.DiskQuotaMB = diskMB.Int64
 	}
 	if box.DiskQuotaMB > 0 {
 		box.HasQuota = true
@@ -241,11 +246,7 @@ func fleetTiles(boxes []fleetBox) fleetTotals {
 		t.ReceivedMB += b.ReceivedMB
 		t.Torrents += b.Torrents
 		t.CPUHours += b.CPUHours
-		if b.Monthly != "" {
-			if v, err := strconv.ParseFloat(b.Monthly[1:], 64); err == nil {
-				t.MonthlyUSD += v
-			}
-		}
+		t.MonthlyUSD += b.MonthlyUSD
 		if b.NextDue != "" && (t.NextDue == "" || b.NextDue < t.NextDue) {
 			t.NextDue = b.NextDue
 			t.NextDueBox = b.Hostname
@@ -254,10 +255,13 @@ func fleetTiles(boxes []fleetBox) fleetTotals {
 	return t
 }
 
+// isCancelledRequest reports whether the request carries ?cancelled=1.
 func isCancelledRequest(r *http.Request) bool { return r.URL.Query().Get("cancelled") == "1" }
 
 // handleSeedboxFleetSync handles POST /seedboxes/fleet/sync: fetch each keyed
-// provider's feed, reconcile it, then re-link any new seedboxes.
+// provider's feed, then link and reconcile it. Sync does both in one
+// transaction, so a service discovered for the first time is reconciled on
+// this press rather than the next one.
 //
 // A failure is reported through a flash rather than an error page: the cached
 // view still works, and the last good data is what the user should see. The
@@ -295,7 +299,7 @@ func (s *Server) handleSeedboxFleetSync(w http.ResponseWriter, r *http.Request) 
 		syncBudget(len(providers)))
 	defer cancel()
 
-	feed, reconciled, linked, failed, authFailed := 0, 0, 0, 0, 0
+	feed, reconciled, failed, authFailed := 0, 0, 0, 0
 	for _, p := range providers {
 		key, err := s.catalogs.ProviderKey(ctx, p.ID)
 		if err != nil {
@@ -318,17 +322,11 @@ func (s *Server) handleSeedboxFleetSync(w http.ResponseWriter, r *http.Request) 
 			slog.Error("provider sync failed", "provider", p.Name, "id", p.ID, "err", err)
 			continue
 		}
-		// New services may have appeared since the last match.
-		n, err := pulsedmedia.Match(ctx, s.db, p.ID)
-		if err != nil {
-			failed++
-			slog.Error("provider link pass failed", "provider", p.Name, "id", p.ID, "err", err)
-			continue
-		}
+		// Sync links newly discovered boxes and reconciles them in the same
+		// transaction, so there is no separate pass to run here.
 		feed += res.Synced
 		reconciled += res.Matched
-		linked += n
-		if res.Synced > 0 && res.Matched == 0 && n == 0 {
+		if res.Synced > 0 && res.Matched == 0 {
 			slog.Info("provider feed linked to nothing in the inventory",
 				"provider", p.Name, "services", res.Synced)
 		}
@@ -344,14 +342,14 @@ func (s *Server) handleSeedboxFleetSync(w http.ResponseWriter, r *http.Request) 
 			strconv.Itoa(len(providers))+" providers — showing the last good data."
 	case feed == 0:
 		msg = "Sync finished; the feed listed no services."
-	case reconciled == 0 && linked == 0:
+	case reconciled == 0:
 		// Cached but unlinked: without this the page just looks empty after a
 		// "successful" sync.
 		msg = "Fetched " + strconv.Itoa(feed) +
 			" service(s); none are linked to a seedbox yet — link them on the seedbox form."
 	default:
-		msg = "Synced " + strconv.Itoa(feed) + " service(s): " +
-			strconv.Itoa(reconciled) + " updated, " + strconv.Itoa(linked) + " newly linked."
+		msg = "Synced " + strconv.Itoa(feed) + " service(s), reconciled " +
+			strconv.Itoa(reconciled) + " linked box(es)."
 	}
 	if authFailed > 0 {
 		kind = "err"

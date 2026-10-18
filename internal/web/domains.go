@@ -157,6 +157,7 @@ type domainFormView struct {
 	Errors     map[string]string
 }
 
+// handleDomainNew renders GET /domains/new.
 func (s *Server) handleDomainNew(w http.ResponseWriter, r *http.Request) {
 	s.renderDomainForm(w, r, domainFormView{
 		Action: routeDomains,
@@ -164,6 +165,7 @@ func (s *Server) handleDomainNew(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleDomainEdit renders GET /domains/{id}/edit.
 func (s *Server) handleDomainEdit(w http.ResponseWriter, r *http.Request) {
 	st := &model.DomainStore{DB: s.db}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -188,6 +190,7 @@ func (s *Server) handleDomainEdit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// renderDomainForm renders the shared new/edit form.
 func (s *Server) renderDomainForm(w http.ResponseWriter, r *http.Request, view domainFormView) {
 	if view.Providers == nil {
 		view.Providers, _ = s.catalogs.List(r.Context(), model.Catalogs["providers"])
@@ -204,6 +207,7 @@ func (s *Server) renderDomainForm(w http.ResponseWriter, r *http.Request, view d
 	s.render(w, r, "domain_form", data)
 }
 
+// handleDomainCreate handles POST /domains.
 func (s *Server) handleDomainCreate(w http.ResponseWriter, r *http.Request) {
 	d, pricing, errs := parseDomainForm(r)
 	if len(errs) > 0 {
@@ -223,6 +227,7 @@ func (s *Server) handleDomainCreate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, routeDomains+"/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }
 
+// handleDomainUpdate handles POST /domains/{id}/update.
 func (s *Server) handleDomainUpdate(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {

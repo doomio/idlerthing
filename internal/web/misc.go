@@ -130,6 +130,7 @@ type miscFormView struct {
 	Errors     map[string]string
 }
 
+// handleMiscNew renders GET /misc/new.
 func (s *Server) handleMiscNew(w http.ResponseWriter, r *http.Request) {
 	s.renderMiscForm(w, r, miscFormView{
 		Action: routeMisc,
@@ -137,6 +138,7 @@ func (s *Server) handleMiscNew(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleMiscEdit renders GET /misc/{id}/edit.
 func (s *Server) handleMiscEdit(w http.ResponseWriter, r *http.Request) {
 	st := &model.MiscStore{DB: s.db}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -161,6 +163,7 @@ func (s *Server) handleMiscEdit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// renderMiscForm renders the shared new/edit form.
 func (s *Server) renderMiscForm(w http.ResponseWriter, r *http.Request, view miscFormView) {
 	view.Currencies = currencies
 	title := "Add service"
@@ -174,6 +177,7 @@ func (s *Server) renderMiscForm(w http.ResponseWriter, r *http.Request, view mis
 	s.render(w, r, "misc_form", data)
 }
 
+// handleMiscCreate handles POST /misc.
 func (s *Server) handleMiscCreate(w http.ResponseWriter, r *http.Request) {
 	m, pricing, errs := parseMiscForm(r)
 	if len(errs) > 0 {
@@ -193,6 +197,7 @@ func (s *Server) handleMiscCreate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, routeMisc+"/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }
 
+// handleMiscUpdate handles POST /misc/{id}/update.
 func (s *Server) handleMiscUpdate(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {

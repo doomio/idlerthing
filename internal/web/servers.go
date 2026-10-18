@@ -242,6 +242,7 @@ func priceYrDisplay(p *model.Pricing, rates map[string]float64) string {
 	return fmt.Sprintf("$%.2f/yr", monthly*12)
 }
 
+// dash renders s for display, substituting "—" when it is empty.
 func dash(s string) string {
 	if s == "" {
 		return "—"
@@ -617,6 +618,8 @@ func parsePricingForm(r *http.Request, errs map[string]string) *model.Pricing {
 	}
 }
 
+// intFormValue parses a form field as an int, returning fallback when
+// absent or unparseable.
 func intFormValue(r *http.Request, name string, fallback int) int {
 	n, err := strconv.Atoi(strings.TrimSpace(r.FormValue(name)))
 	if err != nil {
@@ -639,6 +642,8 @@ func checkedInt(r *http.Request, errs map[string]string, name string, minV, maxV
 	return sql.NullInt64{Int64: n, Valid: true}
 }
 
+// nullIntFormValue parses a form field as a positive int64 (invalid when
+// absent, unparseable, or non-positive).
 func nullIntFormValue(r *http.Request, name string) sql.NullInt64 {
 	n, err := strconv.ParseInt(strings.TrimSpace(r.FormValue(name)), 10, 64)
 	if err != nil || n <= 0 {
@@ -647,6 +652,8 @@ func nullIntFormValue(r *http.Request, name string) sql.NullInt64 {
 	return sql.NullInt64{Int64: n, Valid: true}
 }
 
+// nullStrFormValue trims a form field, returning it as a NullString
+// (invalid when empty).
 func nullStrFormValue(r *http.Request, name string) sql.NullString {
 	v := strings.TrimSpace(r.FormValue(name))
 	if v == "" {

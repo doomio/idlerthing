@@ -41,6 +41,7 @@ type Domain struct {
 const domainColumns = `id, domain, extension, ns1, ns2, ns3, provider_id,
 	active, owned_since, created_at, updated_at`
 
+// scanDomain scans one domainColumns row into a Domain.
 func scanDomain(row interface{ Scan(...any) error }) (*Domain, error) {
 	var d Domain
 	var active int

@@ -128,6 +128,8 @@ type apiPagination struct {
 	Per  int
 }
 
+// parsePagination reads ?page=&per= from the request, applying the
+// default (1/50) and max (200 per page) bounds.
 func parsePagination(r *http.Request) apiPagination {
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	per, _ := strconv.Atoi(r.URL.Query().Get("per"))
@@ -174,6 +176,7 @@ func flatten(v any) any {
 	return flattenValue(rv)
 }
 
+// flattenValue is the recursive implementation behind flatten.
 func flattenValue(rv reflect.Value) any {
 	if !rv.IsValid() {
 		return nil

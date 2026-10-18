@@ -123,6 +123,19 @@ func Sync(ctx context.Context, db *sql.DB, providerID int64, key, url string, no
 	if err := (&model.PMStore{DB: db}).ReplaceTx(ctx, tx, providerID, cached); err != nil {
 		return Result{}, err
 	}
+	// A newly discovered exact-host link must be reconciled in this same
+	// transaction, not on the next manual sync.
+	candidates, err := model.UnlinkedSeedboxesTx(ctx, tx, providerID)
+	if err != nil {
+		return Result{}, err
+	}
+	for _, candidate := range candidates {
+		if id, ok := matchService(candidate.Hostname, cached); ok {
+			if err := model.LinkSeedboxTx(ctx, tx, candidate.SeedboxID, id); err != nil {
+				return Result{}, err
+			}
+		}
+	}
 
 	links, err := model.LinkedSeedboxesTx(ctx, tx, providerID)
 	if err != nil {
@@ -245,6 +258,8 @@ type currentPricing struct {
 	nextDue  string
 }
 
+// currentPricingTx reads the active pricing row for one seedbox (zero value,
+// no error, when none is set).
 func currentPricingTx(ctx context.Context, tx *sql.Tx, seedboxID int64) (currentPricing, error) {
 	var p currentPricing
 	var currency, due sql.NullString
@@ -307,4 +322,5 @@ func usageField[T any](s Service, f func(*Usage) T) T {
 	return f(s.Seedbox.Usage)
 }
 
+// nullString converts a string to a NullString (invalid when empty).
 func nullString(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }
