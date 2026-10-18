@@ -53,8 +53,9 @@ type fleetBox struct {
 	CPUHours   int64
 	Torrents   int64
 
-	NextDue string
-	Monthly string
+	NextDue    string
+	Monthly    string
+	MonthlyUSD float64
 }
 
 // fleetTotals are the headline tiles. They count active services only: a
@@ -194,24 +195,28 @@ func (s *Server) fleetRows(r *http.Request, providerID int64, services []model.P
 // buildFleetBox renders one box from its cached service and inventory values.
 func buildFleetBox(hostname string, svc model.PMService, diskMB sql.NullInt64, due string, monthlyUSD float64) fleetBox {
 	box := fleetBox{
-		Hostname:    hostname,
-		Product:     svc.Product,
-		Status:      svc.Status,
-		Cancelled:   !pulsedmedia.IsActive(svc.Status),
-		DiskUsedMB:  svc.DiskUsedBytes / (1024 * 1024),
-		DiskQuotaMB: svc.DiskQuotaBytes / (1024 * 1024),
-		Sent:        fmtMB(svc.SentBytes / (1024 * 1024)),
-		Received:    fmtMB(svc.ReceivedBytes / (1024 * 1024)),
-		SentMB:      svc.SentBytes / (1024 * 1024),
-		ReceivedMB:  svc.ReceivedBytes / (1024 * 1024),
-		CPUHours:    svc.CPUHours,
-		Torrents:    svc.Torrents,
+		Hostname:   hostname,
+		Product:    svc.Product,
+		Status:     svc.Status,
+		Cancelled:  !pulsedmedia.IsActive(svc.Status),
+		DiskUsedMB: svc.DiskUsedBytes / (1024 * 1024),
+		Sent:       fmtMB(svc.SentBytes / (1024 * 1024)),
+		Received:   fmtMB(svc.ReceivedBytes / (1024 * 1024)),
+		SentMB:     svc.SentBytes / (1024 * 1024),
+		ReceivedMB: svc.ReceivedBytes / (1024 * 1024),
+		CPUHours:   svc.CPUHours,
+		Torrents:   svc.Torrents,
+		MonthlyUSD: monthlyUSD,
 	}
+
 	// The inventory's due date wins when set: it is what the rest of the app
 	// shows, and the sync already applied the precedence rule to it.
 	box.NextDue = due
 	if box.NextDue == "" {
 		box.NextDue = svc.NextDue
+	}
+	if diskMB.Valid {
+		box.DiskQuotaMB = diskMB.Int64
 	}
 	if box.DiskQuotaMB > 0 {
 		box.HasQuota = true
@@ -238,11 +243,7 @@ func fleetTiles(boxes []fleetBox) fleetTotals {
 		t.ReceivedMB += b.ReceivedMB
 		t.Torrents += b.Torrents
 		t.CPUHours += b.CPUHours
-		if b.Monthly != "" {
-			if v, err := strconv.ParseFloat(b.Monthly[1:], 64); err == nil {
-				t.MonthlyUSD += v
-			}
-		}
+		t.MonthlyUSD += b.MonthlyUSD
 		if b.NextDue != "" && (t.NextDue == "" || b.NextDue < t.NextDue) {
 			t.NextDue = b.NextDue
 			t.NextDueBox = b.Hostname
@@ -293,11 +294,7 @@ func (s *Server) handleSeedboxFleetSync(w http.ResponseWriter, r *http.Request) 
 			failed++
 			continue
 		}
-		// New services may have appeared since the last match.
-		if _, err := pulsedmedia.Match(r.Context(), s.db, providerID); err != nil {
-			failed++
-			continue
-		}
+		// Sync now links and reconciles new boxes in the same transaction.
 		synced += res.Synced
 	}
 

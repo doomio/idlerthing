@@ -126,13 +126,31 @@ func TestFleetUsagePresentation(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body := readBody(t, resp)
-	for _, label := range []string{"Storage used", "Traffic sent", "Traffic received", "Disk usage", "w5", "periods may differ by box"} {
+	for _, label := range []string{"Storage used", "Traffic sent", "Traffic received", "Disk usage", "periods may differ by box"} {
 		if !strings.Contains(body, label) {
 			t.Errorf("fleet missing %q", label)
 		}
 	}
 	if strings.Contains(body, "style=\"width:") {
 		t.Error("fleet meter must use the existing CSP-safe width classes")
+	}
+}
+
+func TestFleetUsesEditedInventoryQuota(t *testing.T) {
+	svc := model.PMService{DiskUsedBytes: 2 * 1024 * 1024 * 1024, DiskQuotaBytes: 8 * 1024 * 1024 * 1024}
+	box := buildFleetBox("box.example.net", svc, sql.NullInt64{Int64: 4 * 1024, Valid: true}, "", 0)
+	if box.DiskQuotaMB != 4*1024 || box.DiskPct != 50 {
+		t.Fatalf("fleet ignored inventory quota: quota=%d pct=%d", box.DiskQuotaMB, box.DiskPct)
+	}
+}
+
+func TestFleetMonthlyTotalUsesUnroundedAmounts(t *testing.T) {
+	boxes := []fleetBox{
+		{Monthly: "$0.01", MonthlyUSD: 0.005},
+		{Monthly: "$0.01", MonthlyUSD: 0.005},
+	}
+	if got := fleetTiles(boxes).MonthlyUSD; got != 0.01 {
+		t.Fatalf("monthly total = %v, want 0.01 before display rounding", got)
 	}
 }
 

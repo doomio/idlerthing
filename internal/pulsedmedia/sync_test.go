@@ -159,6 +159,29 @@ func TestEffective(t *testing.T) {
 	}
 }
 
+func TestSyncMatchesAndReconcilesNewBox(t *testing.T) {
+	database := syncDB(t)
+	provider := seedProviderKey(t, database, "k")
+	box := seedSeedbox(t, database, provider, "box.example.net")
+	body := feedJSON(`{"id":101,"domain":"box.example.net","status":"Active","next_due":"2027-05-03",` +
+		`"billing_cycle":"Quarterly","recurring_amount":44.97,` +
+		`"seedbox":{"usage":{"disk_quota_bytes":4294967296}}}`)
+	srv := mockFeed(t, body)
+	if _, err := Sync(context.Background(), database, provider, "k", srv.URL, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got := readLink(t, database, box); !got.Valid || got.Int64 != 101 {
+		t.Fatalf("new box not linked in sync: %+v", got)
+	}
+	price, term, _, due, ok := readPricing(t, database, box)
+	if !ok || price != 44.97 || term != model.TermQuarterly || due != "2027-05-03" {
+		t.Fatalf("new box not reconciled: price=%v term=%d due=%q ok=%v", price, term, due, ok)
+	}
+	if disk, valid := readDisk(t, database, box); !valid || disk != 4096 {
+		t.Fatalf("new box quota not reconciled: %d valid=%v", disk, valid)
+	}
+}
+
 // The whole point of comparing against the previous feed value: a renewal
 // that comes round again must move forward, not freeze at the first value.
 func TestSyncAdvancesRenewal(t *testing.T) {
