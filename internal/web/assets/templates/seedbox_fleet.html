@@ -50,28 +50,30 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 </div>
 {{else}}
 
-<div class="stat-grid">
-  <div class="stat"><div class="stat-label">Boxes</div><div class="stat-value">{{$v.Totals.Boxes}}</div></div>
-  <div class="stat"><div class="stat-label">Storage</div><div class="stat-value">{{fmtMB $v.Totals.StorageMB}}</div></div>
-  <div class="stat"><div class="stat-label">Torrents</div><div class="stat-value">{{$v.Totals.Torrents}}</div></div>
-  <div class="stat"><div class="stat-label">CPU hours</div><div class="stat-value">{{$v.Totals.CPUHours}}</div></div>
-  <div class="stat">
+<div class="stat-grid fleet-stats">
+  <div class="stat-card"><div class="stat-label">Boxes</div><div class="stat-value mono">{{$v.Totals.Boxes}}</div></div>
+  <div class="stat-card"><div class="stat-label">Storage used</div><div class="stat-value mono">{{fmtMB $v.Totals.StorageUsedMB}} <small>/ {{fmtMB $v.Totals.StorageMB}}</small></div></div>
+  <div class="stat-card"><div class="stat-label">Traffic sent</div><div class="stat-value mono">{{fmtMB $v.Totals.SentMB}}</div><div class="stat-sub">Provider-reported usage</div></div>
+  <div class="stat-card"><div class="stat-label">Traffic received</div><div class="stat-value mono">{{fmtMB $v.Totals.ReceivedMB}}</div><div class="stat-sub">Provider-reported usage</div></div>
+  <div class="stat-card"><div class="stat-label">Torrents</div><div class="stat-value mono">{{$v.Totals.Torrents}}</div></div>
+  <div class="stat-card"><div class="stat-label">CPU hours</div><div class="stat-value mono">{{$v.Totals.CPUHours}}</div><div class="stat-sub">Provider-reported usage, not live CPU</div></div>
+  <div class="stat-card">
     <div class="stat-label">Monthly cost</div>
-    <div class="stat-value">{{if $v.Totals.MonthlyUSD}}${{printf "%.2f" $v.Totals.MonthlyUSD}}{{else}}—{{end}}</div>
+    <div class="stat-value mono">{{if $v.Totals.MonthlyUSD}}${{printf "%.2f" $v.Totals.MonthlyUSD}}{{else}}—{{end}}</div>
   </div>
-  <div class="stat">
+  <div class="stat-card">
     <div class="stat-label">Next renewal</div>
-    <div class="stat-value">{{if $v.Totals.NextDue}}{{$v.Totals.NextDue}}{{else}}—{{end}}</div>
+    <div class="stat-value mono">{{if $v.Totals.NextDue}}{{$v.Totals.NextDue}}{{else}}—{{end}}</div>
     {{if $v.Totals.NextDueBox}}<div class="stat-sub mono">{{$v.Totals.NextDueBox}}</div>{{end}}
   </div>
 </div>
 
 {{if $v.Boxes}}
-<div class="card-grid">
+<div class="card-grid fleet-grid">
   {{range $v.Boxes}}
-  <div class="panel fleet-card{{if .Cancelled}} is-muted{{end}}">
+  <article class="panel fleet-card{{if .Cancelled}} is-muted{{end}}">
     <div class="fleet-card-head">
-      <span class="mono">{{.Hostname}}</span>
+      <strong class="mono fleet-host">{{.Hostname}}</strong>
       {{if .Cancelled}}
       <span class="badge badge-off">cancelled</span>
       {{else if .Status}}
@@ -80,18 +82,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
     </div>
     <div class="page-sub">{{if .Product}}{{.Product}}{{else}}—{{end}}</div>
 
-    {{if .HasQuota}}
-    <div class="meter" role="img" aria-label="disk {{.DiskPct}}% used">
-      <div class="meter-fill" style="width: {{if gt .DiskPct 100}}100{{else}}{{.DiskPct}}{{end}}%"></div>
+    <div class="fleet-storage">
+      <div class="fleet-storage-head"><span>Disk usage</span><strong class="mono">{{if .HasQuota}}{{fmtMB .DiskUsedMB}} / {{fmtMB .DiskQuotaMB}}{{else if .DiskUsedMB}}{{fmtMB .DiskUsedMB}} used{{else}}no quota reported{{end}}</strong></div>
+      {{if .DiskMeter}}
+      <div role="img" aria-label="Disk usage {{.DiskPct}}% used">{{template "meter" .DiskMeter}}</div>
+      {{end}}
     </div>
-    <div class="mono page-sub">{{fmtMB .DiskUsedMB}} of {{fmtMB .DiskQuotaMB}} ({{.DiskPct}}%)</div>
-    {{else if .DiskUsedMB}}
-    <div class="mono page-sub">{{fmtMB .DiskUsedMB}} used</div>
-    {{else}}
-    <div class="page-sub">no quota reported</div>
-    {{end}}
 
-    <dl class="kv">
+    <dl class="kv fleet-metrics">
       <dt>Sent</dt><dd class="mono">{{.Sent}}</dd>
       <dt>Received</dt><dd class="mono">{{.Received}}</dd>
       <dt>CPU hours</dt><dd class="mono">{{.CPUHours}}</dd>
@@ -99,7 +97,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       <dt>Next due</dt><dd class="mono">{{if .NextDue}}{{.NextDue}}{{else}}—{{end}}</dd>
       <dt>Monthly</dt><dd class="mono">{{if .Monthly}}{{.Monthly}}{{else}}—{{end}}</dd>
     </dl>
-  </div>
+  </article>
   {{end}}
 </div>
 {{else}}

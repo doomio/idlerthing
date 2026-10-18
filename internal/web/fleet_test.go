@@ -99,6 +99,35 @@ func fleetFixtureRates(t *testing.T, database *sql.DB, srv *Server) (providerID 
 	return providerID
 }
 
+func TestFleetUsagePresentation(t *testing.T) {
+	ts, database, srv := newTestServerFull(t)
+	fleetFixtureRates(t, database, srv)
+	client := authedClient(t, ts)
+	resp, err := client.Get(ts.URL + "/seedboxes/fleet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	for _, label := range []string{"Storage used", "Traffic sent", "Traffic received", "Disk usage", "aria-label=\"Disk usage", "w5", "Provider-reported usage, not live CPU"} {
+		if !strings.Contains(body, label) {
+			t.Errorf("fleet missing %q", label)
+		}
+	}
+	if strings.Contains(body, "style=\"width:") {
+		t.Error("fleet meter must use the existing CSP-safe width classes")
+	}
+}
+
+func TestFleetTotalsExcludeCancelledUsage(t *testing.T) {
+	active := fleetBox{DiskUsedMB: 4, DiskQuotaMB: 10, SentMB: 7, ReceivedMB: 3}
+	cancelled := fleetBox{Cancelled: true, DiskUsedMB: 100, DiskQuotaMB: 200, SentMB: 300, ReceivedMB: 400}
+	totals := fleetTiles([]fleetBox{active, cancelled})
+	if totals.StorageUsedMB != 4 || totals.StorageMB != 10 || totals.SentMB != 7 || totals.ReceivedMB != 3 {
+		t.Fatalf("cancelled box contributed usage to totals: %+v", totals)
+	}
+}
+
 func TestFleetRequiresLogin(t *testing.T) {
 	ts, database := newTestServer(t)
 	fleetFixture(t, database)
