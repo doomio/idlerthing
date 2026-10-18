@@ -2,87 +2,81 @@
 
 Status: draft for approval
 Target repo: idlerthing
-Repo path for this file: `docs/superpowers/specs/2026-10-18-pulsedmedia-provider-design.md`
+Repo path: `docs/superpowers/specs/2026-10-18-pulsedmedia-provider-design.md`
 
 ## Intent
 
-pmss-fleet-manager and idlerthing are sibling Go/SQLite apps that both describe the
-same boxes. idlerthing is the general inventory; pmss-fleet-manager is the
-PulsedMedia-specific live view. The goal is to end up with one app — idlerthing —
-that gains the PulsedMedia view, and to retire pmss-fleet-manager without ever
-building a network path between the privacy fleet and the NetBird tailnet.
+idlerthing tracks hosting services as inventory: specs, price, renewal dates,
+labels, notes. It is passive — it stores what you enter and never contacts the
+service. PulsedMedia exposes a read-only customer API that reports, per service,
+the product, renewal date, recurring amount and usage figures (disk used against
+quota, traffic sent and received, CPU-hours, torrent count).
 
-The reason the merge is small: pmss-fleet-manager's live half (SSH probe,
-qBittorrent, Docker, `du`) is not needed, because `qui` already covers
-qBittorrent and the PulsedMedia customer API covers disk, traffic, CPU and
-torrent count. Dropping the SSH half drops the entire reason the app had to sit
-inside the privacy fleet. What remains is one outbound HTTPS `GET` to
-`pulsedmedia.com/remote/pmapi-feed.php` — the same direction as idlerthing's
-existing exchange-rate call, with no inbound listener, no box dialed and no
-tailnet↔privacy-fleet link.
+This adds an optional PulsedMedia provider to idlerthing. A provider holding an
+API key gets its feed fetched on a schedule, cached locally, and rendered as a
+fleet view over the seedboxes linked to it. Durable fields (plan, next due,
+price, quota) reconcile into the inventory; volatile figures (used bytes, CPU,
+torrent count) stay in the cache and are rendered only.
+
+The feed client is adapted from the AGPL-licensed `pmss-fleet-manager` project
+(same author, same licence). Only that project's HTTPS customer-API half is
+reused; none of its SSH, agent or on-box components are.
 
 ## Goals
 
-- A PulsedMedia provider in idlerthing whose API key drives a cached sync of the
-  customer-API feed.
-- A fleet view (pmss-fleet's card/tile layout) over the PM-backed seedboxes,
-  rendered entirely from that cache.
-- The cancelled/suspended services the feed returns are hidden by default and
-  revealable with a toggle; they never count towards totals or cost.
-- The API key never leaves the server through any read path, export or API.
-- Keep the existing seedbox model, list and forms; add to them rather than
-  replacing them.
+- A PulsedMedia provider, identified by an API key, that syncs the customer-API
+  feed into a local cache.
+- A fleet view over the seedboxes linked to that provider, rendered from the
+  cache.
+- Cancelled and suspended services hidden by default and revealable with a
+  toggle; they never count towards totals or cost.
+- The API key never leaving the server through any read path, export or API.
+- Additive to the existing seedbox model, list and forms — no replacement.
 
 ## Non-goals
 
-- No SSH, qBittorrent, Docker, `du`/storage-directory or host-probe code is
-  ported. `qui` owns torrent state.
-- No dedicated top-level "PulsedMedia" section; the fleet view is a view of the
-  existing seedboxes section.
-- No new hand-authorable JSON schema. `GET /export/json` + `idlerthing import`
-  already round-trips a fleet; that stays the import/export story.
-- No alerts engine in v1. pmss-fleet's disk/traffic threshold alerts are not
-  ported; idlerthing's existing due-soon logic is untouched.
-- pmss-fleet-manager is not modified. It keeps running until the replacement is
-  trusted, then is removed by hand.
+- No SSH, qBittorrent, Docker or host-probe support. Nothing is executed on a
+  tracked box; the feed is the only source of live data.
+- No new top-level section; the fleet view lives under the seedboxes section.
+- No new import/export format. `GET /export/json` and `idlerthing import`
+  already round-trip a fleet.
+- No alerting in v1. Threshold alerts are not ported; idlerthing's existing
+  due-soon logic is unchanged.
 
 ## Anti-goals
 
-- Anything that makes idlerthing reachable from the privacy fleet, or makes
-  pulsedmedia.com's feed response reachable unauthenticated.
-- The PMAPI key appearing in `/export/json`, the CSV zip, `/api/providers`, a
-  rendered HTML attribute, a log line, or a database copy that is world-readable.
-- Writing PM usage figures (live, volatile) into the user's inventory columns.
-- PM data appearing on the unauthenticated routes (`/public`, `/license`,
-  `/source`, `/third-party-licenses`).
+- Any inbound listener, remote shell, or credential for a tracked box.
+- The API key appearing in `/export/json`, the CSV zip, `/api/providers`, a
+  rendered HTML attribute, a log line, or a world-readable database copy.
+- Volatile usage figures written into the inventory columns.
+- Feed data appearing on unauthenticated routes.
 
 ## Constraints
 
-- idlerthing is passive today (only exchange-rate and whois calls out). This
-  adds its first provider fetch; keep it in one package and one code path.
-- SQLite is a single writer connection (`SetMaxOpenConns(1)`). Never hold it
-  across a network fetch.
-- The deployment is behind NetBird; `IDLER_BEHIND_TLS_PROXY` may or may not be
-  set. Nothing here depends on the client address.
-- Both apps are AGPLv3-or-later; ported code keeps the header and the notices
-  pipeline (`make notices`, `make notices-check`).
+- Go 1.26 stdlib plus the existing `modernc.org/sqlite`; no new dependencies.
+- The SQLite pool is a single writer connection (`SetMaxOpenConns(1)`). No
+  network call may run inside a write transaction.
+- Migrations are hand-rolled `PRAGMA user_version` files under
+  `internal/db/migrations/`.
+- Every first-party file carries the AGPL header; `make license-check` and
+  `make notices-check` gate CI.
 
-## Decisions already made
+## Decisions
 
-- The key lives on a **Provider** catalog row, not on each seedbox. The feed is
-  one account-wide call, so one key and one fetch is the only shape that fits.
-- Precedence is **"feed wins, manual edits stick,"** implemented as a three-way
-  merge against the previous feed value (see *Precedence* below). No per-field
-  dirty flag, no new columns.
-- Live/volatile figures never touch inventory columns; they live in a cache
-  table and are read-only rendered.
+- The key lives on a **Provider** catalog row, not on each seedbox: the feed is
+  one account-wide request, so one key and one fetch is the only shape that
+  fits.
+- Precedence is **the feed updates a durable field only when you have not
+  changed it**, implemented as a three-way merge against the previous feed value
+  (see below). No per-field dirty flag and no new columns.
+- Volatile figures never touch inventory columns.
 
 ## Precedence
 
-A naive "fill only when empty" rule is wrong here: `next_due` advances every
-billing cycle, so a field filled once would go stale and the dashboard would
-report the box overdue forever. The previous feed value is already stored in
-`pm_services`, so compare against it:
+A "fill only when empty" rule is wrong: `next_due` advances every billing cycle,
+so a field filled once would go stale and the dashboard would report the box
+overdue forever. The previous feed value is already stored in the cache, so
+compare against it:
 
 ```
 if inventory value is empty        -> write the feed value
@@ -90,156 +84,148 @@ else if inventory == previous feed -> write the new feed value   (we wrote it)
 else                               -> keep inventory              (human edited)
 ```
 
-That gives the requested behaviour, advances renewals, and needs no dirty flag.
-When a human clears a field, the next sync refills it from the feed — acceptable
-and documented.
+That gives updatable renewals with manual edits preserved, and needs no dirty
+flag. Clearing a field by hand makes the next sync refill it — acceptable and
+documented.
 
-Status: a service is treated as active iff its `status` equals `"active"`
-case-insensitively, the same rule pmss-fleet uses (`serviceActive`). Everything
-else is hidden by default. Do not enumerate cancelled/suspended/terminated
+A service is active iff its `status` equals `"active"` case-insensitively;
+everything else is hidden by default. Never enumerate cancelled/suspended
 spellings.
 
 ## Design
 
 ### Data model (migration `0014`)
 
-```
+```sql
 ALTER TABLE providers ADD COLUMN pm_api_key TEXT NOT NULL DEFAULT '';
-ALTER TABLE seedboxes  ADD COLUMN pm_service_id INTEGER;   -- PM service id, no FK
+ALTER TABLE seedboxes ADD COLUMN pm_service_id INTEGER;
 
 CREATE TABLE pm_services (
   provider_id INTEGER NOT NULL,
   service_id  INTEGER NOT NULL,
-  product TEXT, grp TEXT, domain TEXT, status TEXT,
-  registered TEXT, next_due TEXT, billing_cycle TEXT,
-  recurring_amount REAL, currency TEXT,
-  username TEXT, login_url TEXT, permanent_address TEXT,
-  -- live usage, rendered only
-  tracked_since TEXT, sent_bytes INTEGER, received_bytes INTEGER,
-  cpu_hours INTEGER, cpu_since TEXT,
-  disk_used_bytes INTEGER, disk_quota_bytes INTEGER, torrents INTEGER,
-  generated_at TEXT, synced_at TEXT NOT NULL,
+  product TEXT NOT NULL DEFAULT '', grp TEXT NOT NULL DEFAULT '',
+  domain TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '',
+  registered TEXT NOT NULL DEFAULT '', next_due TEXT NOT NULL DEFAULT '',
+  billing_cycle TEXT NOT NULL DEFAULT '',
+  recurring_amount REAL NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT '',
+  username TEXT NOT NULL DEFAULT '', login_url TEXT NOT NULL DEFAULT '',
+  permanent_address TEXT NOT NULL DEFAULT '',
+  tracked_since TEXT NOT NULL DEFAULT '',
+  sent_bytes INTEGER NOT NULL DEFAULT 0,
+  received_bytes INTEGER NOT NULL DEFAULT 0,
+  cpu_hours INTEGER NOT NULL DEFAULT 0,
+  cpu_since TEXT NOT NULL DEFAULT '',
+  disk_used_bytes INTEGER NOT NULL DEFAULT 0,
+  disk_quota_bytes INTEGER NOT NULL DEFAULT 0,
+  torrents INTEGER NOT NULL DEFAULT 0,
+  generated_at TEXT NOT NULL DEFAULT '',
+  synced_at TEXT NOT NULL,
   PRIMARY KEY (provider_id, service_id)
 );
 ```
 
-`pm_service_id` is a plain integer, deliberately not a foreign key: the cache
-rows are replaced wholesale on each sync, and a FK would either block that or
-cascade into the user's inventory. A non-matching id just means "no feed data
-for this seedbox".
+`pm_service_id` is a plain integer, deliberately not a foreign key: cache rows
+are replaced wholesale each sync, and a FK would either block that or cascade
+into the inventory. A stale id simply means "no feed data for this seedbox".
 
 ### `internal/pulsedmedia`
 
-Near-port of pmss-fleet's `internal/pmapi`: `Feed`, `Service`, `Access`,
-`Usage`, the tolerant `Amount` JSON unmarshal, `MonthsPerCycle`, `Monthly`,
-`Parse`, and `Fetch`. `Fetch` keeps pmss-fleet's hardening:
+A near-port of `pmss-fleet-manager`'s `internal/pmapi`: `Feed`, `Service`,
+`Access`, `Usage`, the tolerant money `Amount` decoder, `MonthsPerCycle`,
+`Monthly`, `Parse`, `Fetch`. `Fetch` keeps that project's hardening:
 
-- `X-API-Key` header on the exact `FeedURL`; a redirect is refused rather than
-  followed (the key must not travel to a host the feed chooses).
-- 30 s timeout, `io.LimitReader` at 4 MiB, 401/403 mapped to `ErrAuth`.
-- `PMSS_PMAPI_URL` equivalent (`IDLER_PMAPI_URL`) to point tests at a mock.
+- `X-API-Key` header sent only to the exact feed URL; a redirect is refused
+  rather than followed, so the key cannot travel to a host the feed chooses.
+- 30 s timeout, 4 MiB response cap, 401/403 mapped to a sentinel auth error.
+- An `IDLER_PMAPI_URL` override so tests can point at a mock server.
 
 No other package imports `net/http` for this feature.
 
 ### Sync
 
-- Fetch, then open the write transaction — never hold the writer across the
-  network.
-- Replace the provider's `pm_services` rows in one transaction; on a fetch error
-  keep the previous rows and record the error for the view.
-- Trigger: a **Sync now** control on the fleet view, plus a background refresh
-  when the cache is older than 6 h. Single-flight per provider. The page always
-  renders from cache and reports "synced N ago", so a slow or failing fetch
-  never blocks a page load.
-- After a successful sync, apply the precedence rule above to the durable
-  fields on linked seedboxes: `pricings.next_due_date` (`next_due`),
-  `pricings.price` (`recurring_amount`), `pricings.currency` (feed `currency`),
-  `pricings.term` (from `billing_cycle`), and `seedboxes.disk_as_mb`
-  (`disk_quota_bytes`). Create the pricing row if the seedbox has none.
+- Fetch first, then open the write transaction — never hold the writer across
+  the network.
+- Replace the provider's cache rows in one transaction. On a fetch error keep
+  the previous rows and record the error for the view.
+- Triggers: an explicit sync control on the fleet view, plus a refresh when the
+  cache is older than 6 h. Single-flight per provider. Pages always render from
+  the cache and report when it was last synced, so a slow or failing fetch never
+  blocks a page load.
+- After a successful sync, apply the precedence rule to the durable fields on
+  linked seedboxes: `pricings.next_due_date` (`next_due`), `pricings.price`
+  (`recurring_amount`), `pricings.currency` (feed `currency`), `pricings.term`
+  (from `billing_cycle`), and `seedboxes.disk_as_mb` (`disk_quota_bytes`).
+  Create the pricing row when the seedbox has none.
 
-  `pricings.term` is required: idlerthing stores `price` for the whole cycle and
+  `term` is required: idlerthing stores the price for the whole cycle and
   divides by `TermMonths(term)` for monthly cost, so a price written without its
-  term reports the wrong monthly figure. Map `monthly|quarterly|semi-annually|
-  annually` (and the `semiannually`/`yearly` spellings) to idlerthing's existing
-  term constants; for any other cycle leave both `price` and `term` unwritten
-  rather than guess. A `disk_quota_bytes` of 0 writes nothing.
+  term reports a wrong monthly figure. Map `monthly`, `quarterly`,
+  `semi-annually` (`semiannually`), `annually` (`yearly`), `biennially` and
+  `triennially` to idlerthing's existing term constants; for any other cycle
+  leave both `price` and `term` unwritten rather than guess. A quota of 0 writes
+  nothing.
 
 ### Linking a seedbox to a feed service
 
-On sync, for each seedbox whose provider holds a key and with no
-`pm_service_id` yet, match against that provider's services: exact
-`permanent_address`/`login_url` host or `domain` == `seedboxes.hostname`, else
-`hostname` contains the service `username`, else the provider has exactly one
-service. A match is stored. Unmatched rows keep NULL and the seedbox form gains
-a "PulsedMedia service" dropdown (only for providers with a key) to link or
-clear by hand.
+On sync, for each seedbox whose provider holds a key and which has no link yet,
+match against that provider's services: exact `permanent_address` or
+`login_url` host, or `domain`, equal to the seedbox `hostname`
+(case-insensitive); else `hostname` containing the service `username`; else the
+provider having exactly one service. A match is stored; unmatched rows stay
+NULL. The seedbox form gains a service dropdown, shown only for providers with
+a key, to link or clear by hand.
 
 ### Fleet view
 
-`GET /seedboxes/fleet` — a route under the existing seedboxes section, linked
-from the section page. (A dedicated handler and template rather than teaching
-the generic section machinery a second view mode: smaller diff, and the fleet
-rows come from `pm_services`, not from the section's `List`.) Only PM-backed
-seedboxes appear.
-Layout follows pmss-fleet: headline tiles (total storage, total traffic, next
-renewal, monthly cost) over per-box cards (status, disk used vs quota, sent /
-received, CPU-hours, torrent count, plan, next due, price).
+`GET /seedboxes/fleet` — a route under the seedboxes section, linked from the
+section page. A dedicated handler and template rather than a second mode on the
+generic section machinery: smaller diff, and the rows come from the cache rather
+than the section's list function. Only linked seedboxes appear.
 
-Durable fields (plan, next due, price) are read from the inventory rows, which
-the sync has already reconciled — the fleet view performs no precedence logic of
-its own. Only the live figures (disk used, sent/received, CPU-hours, torrent
-count, status) come from `pm_services`. One precedence rule, one place.
+Layout follows the standard fleet pattern: headline tiles (total storage, total
+traffic, next renewal, monthly cost) over per-box cards (status, disk used
+against quota, sent/received, CPU-hours, torrent count, plan, next due, price).
+Durable fields are read from the inventory rows, which the sync has already
+reconciled, so the view performs no precedence logic of its own; only the
+volatile figures come from the cache. One precedence rule, one place.
 
-Cancelled/suspended services: hidden by default. A "show cancelled" toggle
-(query parameter, not a stored setting) reveals them muted; they are excluded
-from the headline tiles and cost in both states.
+Cancelled and suspended services are hidden by default. A "show cancelled"
+toggle (a query parameter, not a stored setting) reveals them muted; they are
+excluded from the headline tiles and cost in both states.
 
-### Key handling (hard requirement)
+### Key handling
 
-`providers` is a name-only catalog (`CatalogItem{ID, Name}`) feeding generic
+`providers` is a name-only catalog — `CatalogItem{ID, Name}` — feeding generic
 list, template, CSV and JSON paths. The key must be invisible to all of them:
 
-- Keep the generic catalog type free of the key. Read it with a dedicated
-  query, not through `CatalogStore.List`.
-- `/export/json` and the CSV zip: never emit `pm_api_key`. Add a test that
-  greps a full export for the key value.
-- `/api/providers`: unchanged shape, no key, no `has_key` field.
-- Catalog edit form: follow pmss-fleet's `Settings.Public()` pattern — a
-  `has_pm_api_key` boolean and an empty field meaning "keep existing"; an
-  explicit clear action removes it. Never echo the key into HTML.
-- Import: ignore `pm_api_key` on both the idlerthing and my-idlers paths.
-- Provider delete/rename does not silently drop the key; deleting the provider
-  removes its `pm_services` rows.
+- Keep the generic catalog type free of the key; read it with dedicated
+  queries, not through `CatalogStore.List`.
+- `/export/json` and the CSV zip never emit `pm_api_key`; a test greps a full
+  export for the key value.
+- `/api/providers` keeps its shape: no key, no `has_key` field.
+- The catalog form follows the "write-only secret" pattern: a boolean saying a
+  key is set, an empty field meaning "keep existing", an explicit clear action,
+  and no echo into HTML.
+- Import ignores `pm_api_key` on every path.
+- Deleting a provider removes its cache rows.
 
 ### Unauthenticated routes
 
-`/public` renders seedboxes with `show_public`. PM-backed seedboxes are excluded
-from `/public` entirely in v1, so PM usage never leaves the login wall. The
-licence/source routes are untouched.
-
-## Rollout
-
-1. Land the migration, package and sync behind a provider with no key set (no
-   behaviour change for existing installs).
-2. Add the fleet view and the linking control.
-3. Run pmss-fleet-manager and idlerthing side by side through one renewal and
-   one disk-threshold event; compare.
-4. Retire pmss-fleet-manager by hand. Its repo stays as-is.
+Seedboxes linked to a provider are excluded from `/public` in v1, so feed data
+never renders outside the login wall. The licence and source routes are
+untouched.
 
 ## Left to the builder
 
-- Exact template/CSS reuse from idlerthing's existing cards vs a new partial.
-- Whether the fleet view is a query parameter or a path segment. (Settled in
-  the plan: a path segment, `GET /seedboxes/fleet`.)
-- Unit conversion: idlerthing stores whole MB (1024-based); the feed uses bytes.
-- Timezone for `next_due` rollover (idlerthing already has rollover logic — reuse
-  it rather than adding a second notion of "due").
-- Whether a stale/failed sync shows a banner or a card badge.
+- Template and CSS reuse: existing card partials versus a new partial.
+- Unit conversion: inventory stores whole MB (1024-based), the feed sends bytes.
+- Whether a stale or failed sync renders a banner or a card badge.
+- Timezone handling for `next_due` rollover: reuse idlerthing's existing
+  rollover rather than adding a second notion of "due".
 
 ## Not in this design
 
-- Threshold alerts (disk %, traffic %, renewal window). Available later from the
-  same cache if wanted.
-- Auto-creating seedboxes for services with no inventory row ("add box"
-  shortcut in pmss-fleet).
-- A sanitized "shareable" export, and a hand-authored import schema.
+- Threshold alerts (disk percentage, traffic percentage, renewal window).
+- Auto-creating seedboxes for feed services with no inventory row.
+- A sanitised shareable export, or a hand-authored import schema.
