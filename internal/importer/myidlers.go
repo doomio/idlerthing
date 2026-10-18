@@ -22,6 +22,7 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -460,8 +461,11 @@ func parseCSVRow(c *csvCells, row []string, line int, warnings *[]string) MyServ
 		LocationName:  c.cell(row, "location_name"),
 		ProviderName:  c.cell(row, "provider_name"),
 	}
-	if st := csvInt(c.cell(row, "server_type")); st != nil && *st >= 1 && *st <= 7 {
-		s.ServerType = int(*st)
+	if st := csvInt(c.cell(row, "server_type")); st != nil {
+		// Bound the value before narrowing it, on the int64 itself.
+		if v := *st; v >= 1 && v <= 7 {
+			s.ServerType = int(v)
+		}
 	}
 	rowLabel := fmt.Sprintf("row %d", line)
 	s.CPU = capMy(csvInt(c.cell(row, "cpu")), 1024, "cpu", rowLabel, warnings)
@@ -547,9 +551,9 @@ func csvPricing(c *csvCells, row []string, line int, warnings *[]string) *myPric
 	if price == nil || !validImportPrice(*price) {
 		return nil
 	}
-	term := 1
+	term := int64(1)
 	if t := csvInt(c.cell(row, "pricing_term")); t != nil {
-		term = int(*t)
+		term = *t
 	}
 	due, dueOK := normDate(c.cell(row, "pricing_next_due_date"))
 	if !dueOK {
@@ -564,10 +568,11 @@ func csvPricing(c *csvCells, row []string, line int, warnings *[]string) *myPric
 		warnf(warnings, "row %d: invalid currency %q — pricing skipped", line, c.cell(row, "pricing_currency"))
 		return nil
 	}
+	// The range check above bounds term to 1..7, so narrowing is safe here.
 	return &myPricing{
 		Currency:    cur,
 		Price:       *price,
-		Term:        term,
+		Term:        int(term),
 		NextDueDate: due,
 	}
 }
@@ -911,7 +916,7 @@ func getOrCreateCatalogTx(ctx context.Context, tx dbtx, table, nameCol, name str
 	if err == nil {
 		return id, false, nil
 	}
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, false, err
 	}
 	res, err := tx.ExecContext(ctx,

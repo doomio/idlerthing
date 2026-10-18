@@ -21,6 +21,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -177,5 +178,40 @@ func TestLoginLogPasswordChangeVerification(t *testing.T) {
 		t.Fatalf("no password-change failure line; got:\n%s", buf.String())
 	} else if m[1] != "127.0.0.1" {
 		t.Fatalf("captured host %q, want 127.0.0.1", m[1])
+	}
+}
+
+// The generated first-run password lives in a file only until somebody proves
+// they can sign in with it; past that point it is a spare copy of a live
+// credential sitting on disk.
+func TestLoginRemovesBootstrapPasswordFile(t *testing.T) {
+	ts, _, s := newTestServerFull(t)
+	path := filepath.Join(t.TempDir(), "test.db.admin-password")
+	if err := os.WriteFile(path, []byte(testPassword+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.SetBootstrapPasswordFile(path)
+
+	login(t, newClient(t), ts, testPassword).Body.Close()
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("the file should be gone after a successful login (err=%v)", err)
+	}
+}
+
+// A refused login must not consume it — the operator may still need to read
+// the password to get in at all.
+func TestFailedLoginKeepsBootstrapPasswordFile(t *testing.T) {
+	ts, _, s := newTestServerFull(t)
+	path := filepath.Join(t.TempDir(), "test.db.admin-password")
+	if err := os.WriteFile(path, []byte(testPassword+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.SetBootstrapPasswordFile(path)
+
+	login(t, newClient(t), ts, "not-the-password").Body.Close()
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the file must survive a refused login: %v", err)
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -431,7 +432,7 @@ func (imp *importer) topLevelPricings(ctx context.Context, doc map[string]any) e
 		err = imp.tx.QueryRowContext(ctx,
 			"SELECT id FROM pricings WHERE service_id = ? AND service_type = ?",
 			newService, serviceType).Scan(&pid)
-		if err != nil && err != sql.ErrNoRows {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		if pid > 0 {

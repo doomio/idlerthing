@@ -296,8 +296,11 @@ func (s *Server) popRevealedToken(w http.ResponseWriter, r *http.Request) string
 	if err != nil || cookie.Value == "" {
 		return ""
 	}
+	// Same attributes as the cookie being cleared: a non-Secure clear can be
+	// refused where the original was Secure, leaving the token visible.
 	http.SetCookie(w, &http.Cookie{
-		Name: apiTokenCookieName, Value: "", Path: routeSettings, HttpOnly: true, MaxAge: -1,
+		Name: apiTokenCookieName, Value: "", Path: routeSettings, HttpOnly: true,
+		Secure: s.cookieSecure(r), MaxAge: -1,
 	})
 	return cookie.Value
 }
@@ -321,13 +324,19 @@ func boolToIntWeb(b bool) int {
 }
 
 // handlePrometheusTest handles POST /settings/prometheus/test — runs an `up`
-// instant query against the configured URL and flashes the outcome.
+// instant query against the URL in the form and flashes the outcome.
 func (s *Server) handlePrometheusTest(w http.ResponseWriter, r *http.Request) {
-	// The SAVED url, whether or not the feature is enabled: the point of
-	// the button is to validate the endpoint before switching it on.
-	baseURL := strings.TrimRight(strings.TrimSpace(s.memoSettings(r).PrometheusURL), "/")
+	// The typed value, so an operator can validate an endpoint BEFORE saving
+	// it — reading the saved one instead would test a different server than
+	// the field beside the button names. Falls back to the saved URL when the
+	// form carries no field at all (the CLI/retry path). Nothing is written.
+	baseURL := strings.TrimSpace(r.FormValue("prometheus_url"))
+	if baseURL == "" {
+		baseURL = strings.TrimSpace(s.memoSettings(r).PrometheusURL)
+	}
+	baseURL = strings.TrimRight(baseURL, "/")
 	if baseURL == "" || !validPromURL(baseURL) {
-		s.setFlash(w, r, "err", "No Prometheus URL configured — save settings first.")
+		s.setFlash(w, r, "err", "No valid Prometheus URL to test — enter one (http:// or https:// with a host).")
 		http.Redirect(w, r, routeSettings, http.StatusSeeOther)
 		return
 	}

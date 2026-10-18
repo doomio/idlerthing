@@ -57,6 +57,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
           {{with index $v.Errors "recently_added_amount"}}<span class="field-err">{{.}}</span>{{end}}
         </label>
       </div>
+      <div class="form-actions mt-section">
+        <button class="btn btn-primary" type="submit">Save settings</button>
+      </div>
     </section>
 
     <section class="panel form-section">
@@ -109,7 +112,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       </div>
       <div class="form-actions mt-section">
         <button class="btn btn-primary" type="submit">Save settings</button>
-        <button class="btn" type="submit" formaction="/settings/prometheus/test">Test connection</button>
+        {{/* Same form, different endpoint: this tests what is in the field
+             right now and writes nothing, so it must not read as a save. */}}
+        <button class="btn" type="submit" formaction="/settings/prometheus/test">Test this URL</button>
+        <span class="field-hint">Tests the URL above without saving it.</span>
       </div>
     </section>
   </form>
@@ -149,7 +155,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
     <p class="empty-sub">
       {{if $v.TokenSet}}A token is currently set. Generating a new one replaces it.{{else}}No token set. The API is disabled until you generate one.{{end}}
     </p>
-    <form method="post" action="/settings/account">
+    <form method="post" action="/settings/account"
+          data-confirm="Generating a new token replaces the current one, and every client using it stops working. Continue?">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <input type="hidden" name="action" value="token">
       <button class="btn" type="submit">Generate new token</button>

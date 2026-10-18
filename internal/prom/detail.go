@@ -58,7 +58,7 @@ type rangeResponse struct {
 func (c *Client) QueryRange(ctx context.Context, promql string, start, end time.Time, stepSeconds int) ([]Point, error) {
 	hc := c.HTTPClient
 	if hc == nil {
-		hc = &http.Client{Timeout: 5 * time.Second}
+		hc = defaultClient(c.BaseURL)
 	}
 	u := fmt.Sprintf("%s/api/v1/query_range?query=%s&start=%d&end=%d&step=%d",
 		c.BaseURL, url.QueryEscape(promql), start.Unix(), end.Unix(), stepSeconds)
@@ -68,7 +68,7 @@ func (c *Client) QueryRange(ctx context.Context, promql string, start, end time.
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, transportError(c.BaseURL, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -83,7 +83,7 @@ func (c *Client) QueryRange(ctx context.Context, promql string, start, end time.
 		if msg == "" {
 			msg = body.Status
 		}
-		return nil, fmt.Errorf("query failed: %s", msg)
+		return nil, fmt.Errorf("query failed: %s", clip(msg, 200))
 	}
 	if len(body.Data.Result) == 0 {
 		return nil, nil

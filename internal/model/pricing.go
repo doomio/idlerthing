@@ -21,6 +21,7 @@ package model
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -173,7 +174,7 @@ func (s *PricingStore) Get(ctx context.Context, serviceType int, serviceID int64
 		SELECT id, service_id, service_type, currency, price, term, next_due_date, active
 		FROM pricings WHERE service_type = ? AND service_id = ? AND active = 1`, serviceType, serviceID).
 		Scan(&p.ID, &p.ServiceID, &p.ServiceType, &p.Currency, &p.Price, &p.Term, &p.NextDueDate, &active)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

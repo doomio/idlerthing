@@ -271,6 +271,13 @@ func TestFleetExcludesCancelledFromTotals(t *testing.T) {
 		if !strings.Contains(body, "14.99") {
 			t.Fatalf("the active service's monthly cost is missing (%q)", q)
 		}
+		// The tiles are active-only, so the page has to account for the
+		// cancelled boxes it shows — and stay quiet when it shows none.
+		if note := strings.Contains(body, "cancelled listed below"); q == "" && note {
+			t.Fatal("the cancelled note appears while no cancelled box is listed")
+		} else if q != "" && !note {
+			t.Fatal("a cancelled box is listed without saying it is excluded from the tiles")
+		}
 	}
 }
 
@@ -336,5 +343,129 @@ func TestFleetSyncRequiresCSRF(t *testing.T) {
 	}
 	if resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusOK {
 		t.Fatalf("a CSRF-less sync must be rejected, got %d", resp.StatusCode)
+	}
+}
+
+// A transport failure must be reported as a failure — not as "the feed listed
+// no services", which is what a discarded error used to produce because the
+// fetch left the synced counter at zero. The cached rows also have to survive:
+// one bad sync must not blank the fleet page.
+func TestFleetSyncReportsTransportFailure(t *testing.T) {
+	ts, database, srv := newTestServerFull(t)
+	fleetFixture(t, database)
+
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(feed.Close)
+	srv.pmapiURL = feed.URL
+
+	before := pmServiceCount(t, database)
+	client := authedClient(t, ts)
+	resp := postForm(t, client, ts, "/seedboxes/fleet/sync", url.Values{})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("sync: status %d", resp.StatusCode)
+	}
+	body := fleetFlash(t, client, ts)
+
+	if !strings.Contains(body, "Every provider failed to sync") {
+		t.Errorf("flash did not report the failed sync; flash: %s", body)
+	}
+	if strings.Contains(body, "listed no services") {
+		t.Error("a transport failure must not be reported as an empty feed")
+	}
+	if got := pmServiceCount(t, database); got != before {
+		t.Errorf("a failed sync destroyed the cache: %d rows -> %d", before, got)
+	}
+}
+
+// A rejected key is a different fix than a network failure, and the operator
+// only learns which one to go fix if the flash says so.
+func TestFleetSyncNamesRejectedKey(t *testing.T) {
+	ts, database, srv := newTestServerFull(t)
+	fleetFixture(t, database)
+
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusUnauthorized)
+	}))
+	t.Cleanup(feed.Close)
+	srv.pmapiURL = feed.URL
+
+	client := authedClient(t, ts)
+	resp := postForm(t, client, ts, "/seedboxes/fleet/sync", url.Values{})
+	resp.Body.Close()
+	body := fleetFlash(t, client, ts)
+
+	if !strings.Contains(body, "API key was rejected") {
+		t.Errorf("flash should point at the key; flash: %s", body)
+	}
+	assertNoKey(t, "the sync flash", body, testProviderKey)
+}
+
+func pmServiceCount(t *testing.T, database *sql.DB) int {
+	t.Helper()
+	var n int
+	if err := database.QueryRow("SELECT COUNT(*) FROM pm_services").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// fleetFlash follows a sync's redirect and returns the rendered flash text.
+func fleetFlash(t *testing.T, client *http.Client, ts *httptest.Server) string {
+	t.Helper()
+	resp, err := client.Get(ts.URL + "/seedboxes/fleet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+	if i := strings.Index(body, `<div class="flash`); i >= 0 {
+		if j := strings.Index(body[i:], "</div>"); j >= 0 {
+			return body[i : i+j]
+		}
+	}
+	return "(no flash rendered)"
+}
+
+// The fleet page holds "Sync now", and a seedbox can only be linked to a feed
+// that has been synced, so gating its nav link on an existing link left the
+// first sync unreachable. A key on a provider is enough to offer the page.
+func TestFleetNavOffersThePageOnceAKeyExists(t *testing.T) {
+	ts, database, _ := newTestServerFull(t)
+	seedProviderWithKey(t, database, testProviderKey)
+	client := authedClient(t, ts)
+
+	resp, err := client.Get(ts.URL + "/servers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+
+	if !strings.Contains(body, `href="/seedboxes/fleet"`) {
+		t.Fatal("a keyed provider must offer the fleet view even with nothing linked yet")
+	}
+	if strings.Contains(body, "Old Box") {
+		t.Error("the nav link must not pull fleet data into another page")
+	}
+}
+
+// With no key anywhere, the fleet has nothing to read — the link stays out of
+// the way rather than promising an empty page.
+func TestFleetNavHiddenWithoutAKey(t *testing.T) {
+	ts, _, _ := newTestServerFull(t)
+	client := authedClient(t, ts)
+
+	resp, err := client.Get(ts.URL + "/servers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+
+	if strings.Contains(body, `href="/seedboxes/fleet"`) {
+		t.Fatal("the fleet link should not appear for an install that cannot use it")
 	}
 }

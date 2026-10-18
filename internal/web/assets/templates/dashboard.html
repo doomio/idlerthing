@@ -49,6 +49,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <div class="dash-grid">
+  {{/* A brand-new install otherwise shows five zeros and nothing to click. */}}
+  {{if not $v.TotalServices}}
+  <section class="panel empty-state">
+    <div class="empty-title">Nothing inventoried yet</div>
+    <div class="empty-sub">
+      Add the services you pay for, and the tiles above start counting them.
+      If you are moving data from another tool,
+      <code>idlerthing import &lt;file&gt;</code> reads JSON and CSV.
+    </div>
+    <div class="fleet-actions">
+      <a class="btn btn-primary" href="/servers/new">Add a server</a>
+      <a class="btn" href="/seedboxes/new">Add a seedbox</a>
+      <a class="btn" href="/domains/new">Add a domain</a>
+      <a class="btn" href="/misc/new">Add something else</a>
+    </div>
+  </section>
+  {{end}}
+
   <section class="panel">
     <h2 class="section-title">Due soon ({{$v.DueSoonDays}} days)</h2>
     {{if $v.DueSoon}}

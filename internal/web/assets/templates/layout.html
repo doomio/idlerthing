@@ -30,6 +30,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
   <script src="/static/app.js?v={{.AssetV}}" defer></script>
 </head>
 <body{{if .Compact}} class="compact"{{end}}>
+<a class="skip-link" href="#main">Skip to content</a>
 <div class="shell">
   <aside class="sidebar">
     <div class="logo">
@@ -37,7 +38,50 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       <span class="logo-word">idlerthing</span>
     </div>
 
-    <nav class="nav">
+    {{template "sidebar_nav" .}}
+
+    <div class="sidebar-foot">
+      <div class="foot-row">
+        <a class="nav-item{{if eq .Nav "settings"}} active{{end}}" href="/settings">
+          <span class="nav-label">Settings</span>
+        </a>
+        <form method="post" action="/prefs/theme" class="theme-form">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <button class="icon-btn" type="submit" aria-label="Toggle colour theme" title="Toggle theme">{{if eq .Theme "dark"}}☀{{else}}☾{{end}}</button>
+        </form>
+      </div>
+      <div class="user-card">
+        <span class="user-name">{{if .User}}{{.User.Name}}{{end}}</span>
+        <form method="post" action="/logout">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <button class="link-btn" type="submit">Log out</button>
+        </form>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main" id="main">
+    {{if .Flash}}
+    <div class="flash flash-{{.Flash.Kind}}" role="{{if eq .Flash.Kind "err"}}alert{{else}}status{{end}}">{{.Flash.Message}}</div>
+    {{end}}
+    {{/* htmx swaps never re-render the layout, so this fires once per page
+         load — the honest version of "the delete button does nothing". */}}
+    <noscript>
+      <div class="flash flash-warn">JavaScript is off, so deleting is unavailable: its confirmation only runs with JavaScript, and the app will not delete a record on a single unconfirmed click. Live search needs it too. Browsing, sorting, editing and saving all work without it.</div>
+    </noscript>
+    <div id="htmx-alert" aria-live="assertive"></div>
+    {{template "content" .}}
+  </main>
+</div>
+</body>
+</html>
+{{end}}
+
+{{/* The navigation column as its own define: a catalog mutation swaps its list
+     in place, and app.js then re-fetches just this block (GET
+     /partials/counts) so the counts beside it catch up. */}}
+{{define "sidebar_nav"}}
+    <nav class="nav" id="sidebar-nav" aria-label="Inventory">
       <a class="nav-item{{if eq .Nav "dashboard"}} active{{end}}" href="/">
         <span class="nav-label">Dashboard</span>
       </a>
@@ -55,7 +99,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       <a class="nav-item{{if eq .Nav "seedboxes"}} active{{end}}" href="/seedboxes">
         <span class="nav-label">SeedBoxes</span><span class="nav-count mono">{{.Counts.Seedboxes}}</span>
       </a>
-      {{if .Counts.PMFleet}}
+      {{if or .Counts.PMFleet .Counts.PMKeyed}}
       <a class="nav-item" href="/seedboxes/fleet">
         <span class="nav-label">Fleet</span><span class="nav-count mono">{{.Counts.PMFleet}}</span>
       </a>
@@ -97,34 +141,4 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
         <span class="nav-label">Notes</span><span class="nav-count mono">{{.Counts.Notes}}</span>
       </a>
     </nav>
-
-    <div class="sidebar-foot">
-      <div class="foot-row">
-        <a class="nav-item{{if eq .Nav "settings"}} active{{end}}" href="/settings">
-          <span class="nav-label">Settings</span>
-        </a>
-        <form method="post" action="/prefs/theme" class="theme-form">
-          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-          <button class="icon-btn" type="submit" title="Toggle theme">{{if eq .Theme "dark"}}☀{{else}}☾{{end}}</button>
-        </form>
-      </div>
-      <div class="user-card">
-        <span class="user-name">{{if .User}}{{.User.Name}}{{end}}</span>
-        <form method="post" action="/logout">
-          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-          <button class="link-btn" type="submit">Log out</button>
-        </form>
-      </div>
-    </div>
-  </aside>
-
-  <main class="main">
-    {{if .Flash}}
-    <div class="flash flash-{{.Flash.Kind}}">{{.Flash.Message}}</div>
-    {{end}}
-    {{template "content" .}}
-  </main>
-</div>
-</body>
-</html>
 {{end}}

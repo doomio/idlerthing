@@ -314,6 +314,29 @@ h1 { font-size: 18px; font-weight: 600; margin: 0; }
 }
 .flash-ok { border-left-color: var(--ok); }
 .flash-err { border-left-color: var(--err); }
+.flash-warn { border-left-color: var(--warn); }
+
+/* ---------- Accessibility helpers ---------- */
+/* Parked off-screen until it takes focus, so keyboard users can jump past the
+   sidebar without sighted mouse users ever seeing it. */
+.skip-link {
+  position: absolute;
+  top: 0;
+  left: -9999px;
+  z-index: 10;
+  padding: 8px 14px;
+  background: var(--panel);
+  border: 1px solid var(--acc);
+  border-radius: 0 0 var(--radius) 0;
+}
+.skip-link:focus { left: 0; }
+
+/* htmx puts .htmx-request on the element driving an in-flight request. Scoped
+   to the controls that can trigger one so a swapped-in panel never sits dimmed
+   because the nav refresh tagged it. */
+a.htmx-request,
+button.htmx-request,
+form.htmx-request { opacity: .55; }
 
 /* ---------- Auth (login) ---------- */
 .auth-body {
@@ -759,6 +782,8 @@ select:focus { outline: none; border-color: var(--acc); }
   margin-top: 14px;
 }
 .dash-grid section:last-child { grid-column: 1 / -1; }
+/* the first-run panel is a call to action, not another tile in the grid */
+.dash-grid .empty-state { grid-column: 1 / -1; }
 @media (max-width: 900px) {
   .dash-grid { grid-template-columns: 1fr; }
 }

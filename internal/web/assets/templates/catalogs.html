@@ -55,7 +55,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
               hx-post="/catalogs/{{$v.Kind}}/{{.ID}}/update" hx-target="#catalog-list" hx-swap="innerHTML">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <input type="text" name="name" value="{{.Name}}" required aria-label="Name">
-          <button class="icon-btn" type="submit" title="Save">✓</button>
+          <button class="icon-btn" type="submit" aria-label="Save this name" title="Save">✓</button>
         </form>
       </td>
       {{if $v.ShowCounts}}<td class="mono">{{index $v.Counts .ID}}</td>{{end}}
@@ -72,16 +72,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
           {{if index $v.HasKey .ID}}
           <label class="field-hint"><input type="checkbox" name="clear_key" value="on"> clear</label>
           {{end}}
-          <button class="icon-btn" type="submit" title="Save key">✓</button>
+          <button class="icon-btn" type="submit" aria-label="Save the PulsedMedia API key for {{.Name}}" title="Save key">✓</button>
         </form>
       </td>
       {{end}}
       <td class="col-actions">
-        <form method="post" action="/catalogs/{{$v.Kind}}/{{.ID}}/delete"
+        <form method="post" action="/js-required"
               hx-post="/catalogs/{{$v.Kind}}/{{.ID}}/delete" hx-target="#catalog-list" hx-swap="innerHTML"
               hx-confirm="Delete {{.Name}}?">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-          <button class="icon-btn danger" type="submit" title="Delete">🗑</button>
+          <button class="icon-btn danger" type="submit" aria-label="Delete {{.Name}}" title="Delete">🗑</button>
         </form>
       </td>
     </tr>

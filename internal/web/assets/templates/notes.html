@@ -38,10 +38,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       <td class="mono">{{.Created}}</td>
       <td class="col-actions">
         <div class="row-actions">
-          <form method="post" action="/notes/{{.ID}}/delete" hx-post="/notes/{{.ID}}/delete" hx-confirm="Delete note?">
+          <form method="post" action="/js-required" hx-post="/notes/{{.ID}}/delete" hx-confirm="Delete note?">
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
             <input type="hidden" name="back" value="/notes">
-            <button class="icon-btn danger" type="submit" title="Delete">🗑</button>
+            <button class="icon-btn danger" type="submit" aria-label="Delete note" title="Delete">🗑</button>
           </form>
         </div>
       </td>

@@ -65,6 +65,20 @@ type liveMonCache struct {
 	inFlight map[string]chan struct{}
 }
 
+// pruneLocked drops instances that have not been refreshed within cacheKeep
+// (declared in prometheus.go). Caller holds mu. inFlight needs no pruning:
+// each entry is removed as its leader finishes, and a baseURL change closes
+// them all at once. A single view here carries ten sparkline strings, so this
+// map is the heavier of the two per-instance caches.
+func (c *liveMonCache) pruneLocked(now time.Time) {
+	for instance, at := range c.at {
+		if now.Sub(at) > cacheKeep {
+			delete(c.at, instance)
+			delete(c.v, instance)
+		}
+	}
+}
+
 // liveMonEntry fetches + caches the section for one instance.
 func (s *Server) liveMonEntry(r *http.Request, instance string) *liveMonView {
 	enabled, baseURL := s.promSettings(r)
@@ -146,6 +160,7 @@ func (s *Server) liveMonEntry(r *http.Request, instance string) *liveMonView {
 		delete(s.livemon.inFlight, instance)
 	}
 	if stillCurrent && s.livemon.baseURL == baseURL {
+		s.livemon.pruneLocked(time.Now())
 		s.livemon.at[instance] = time.Now()
 		s.livemon.v[instance] = view
 	}

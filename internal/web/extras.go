@@ -100,17 +100,42 @@ func (s *Server) buildExtras(r *http.Request, serviceID int64, serviceType int) 
 // HX-Request still set, receives only the content block, and swaps a whole
 // page fragment into the tiny delete form.
 func redirectBack(w http.ResponseWriter, r *http.Request, fallback string) {
-	back := r.FormValue("back")
-	if u, err := url.Parse(back); err != nil || u.Scheme != "" || u.Host != "" ||
-		strings.Contains(back, "\\") || !strings.HasPrefix(back, "/") {
-		back = fallback
-	}
+	back := sameOriginPath(r.FormValue("back"), fallback)
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Redirect", back)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// sameOriginPath returns raw only when it names a path on this origin, and
+// returns it rebuilt from the parsed URL so no scheme or authority can survive
+// into the redirect; anything else gets fallback. Testing the raw string for a
+// leading slash is not enough on its own: browsers normalize "/\evil.com" to
+// the protocol-relative "//evil.com".
+func sameOriginPath(raw, fallback string) string {
+	if strings.ContainsRune(raw, '\\') {
+		return fallback
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "" || u.Host != "" || !strings.HasPrefix(u.Path, "/") {
+		return fallback
+	}
+	return u.RequestURI()
+}
+
+// handleJSRequired is where the destructive forms land when JavaScript is off.
+// Their confirmation lives in htmx's hx-confirm, which cannot run without it, so
+// a working plain action would leave "delete this record, permanently, on a
+// single stray click" as the no-JS path. Refusing is the safer fallback; the
+// confirmed path is the hx-post, which is what runs whenever htmx loaded. The
+// CSRF token travels in the body, so this stays a normal protected unsafe
+// request either way.
+func (s *Server) handleJSRequired(w http.ResponseWriter, r *http.Request) {
+	s.setFlash(w, r, "err",
+		"That action needs JavaScript: its confirmation cannot run without it, so nothing was changed.")
+	redirectBack(w, r, "/")
 }
 
 // formInt64 parses a required int64 form field.
@@ -180,7 +205,7 @@ func (s *Server) handleLabelUnassign(w http.ResponseWriter, r *http.Request) {
 	labelID, err1 := formInt64(r, "label_id")
 	serviceID, err2 := formInt64(r, "service_id")
 	serviceType, err3 := formInt64(r, "service_type")
-	if err1 != nil || err2 != nil || err3 != nil {
+	if err1 != nil || err2 != nil || err3 != nil || serviceType < 1 || serviceType > 6 {
 		http.Error(w, errMsgBadRequest, http.StatusBadRequest)
 		return
 	}

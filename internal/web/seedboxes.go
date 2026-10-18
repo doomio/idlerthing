@@ -18,6 +18,7 @@ package web
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -248,7 +249,7 @@ func (s *Server) handleSeedboxEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, pricing, err := st.Get(r.Context(), id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}
@@ -333,7 +334,7 @@ func (s *Server) handleSeedboxUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := st.Update(r.Context(), b, pricing); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
 		}

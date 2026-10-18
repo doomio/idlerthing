@@ -144,7 +144,7 @@ func (s *LabelStore) FindOrCreate(ctx context.Context, name string) (int64, erro
 	if err == nil {
 		return id, nil
 	}
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
 	res, err := s.DB.ExecContext(ctx, "INSERT INTO labels (label) VALUES (?)", name)

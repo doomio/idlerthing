@@ -386,3 +386,85 @@ func TestDashboardRendersWithData(t *testing.T) {
 		t.Fatal("spec summary missing")
 	}
 }
+
+// A first install showed five zeros and gave the operator nothing to act on.
+func TestDashboardEmptyStateOffersFirstSteps(t *testing.T) {
+	ts, _, _ := newTestServerFull(t)
+	client := authedClient(t, ts)
+
+	resp, err := client.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+
+	for _, want := range []string{"Nothing inventoried yet", `href="/servers/new"`, "idlerthing import"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("an empty dashboard is missing %q", want)
+		}
+	}
+}
+
+// With JavaScript off a destructive form lands on /js-required. The operator has
+// to be told why, and the row must survive.
+func TestJSRequiredRefusesAndExplains(t *testing.T) {
+	ts, database, _ := newTestServerFull(t)
+	client := authedClient(t, ts)
+	createServer(t, client, ts, "js-off")
+
+	resp := postForm(t, client, ts, "/js-required", url.Values{})
+	if resp.StatusCode != http.StatusSeeOther {
+		resp.Body.Close()
+		t.Fatalf("expected a 303 back to the app, got %d", resp.StatusCode)
+	}
+	if to := resp.Header.Get("Location"); to != "/" {
+		t.Errorf("Location = %q, want /", to)
+	}
+	resp.Body.Close()
+
+	page, err := client.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.Body.Close()
+	body := readBody(t, page)
+
+	if !strings.Contains(body, "needs JavaScript") {
+		t.Fatal("the refusal did not explain itself")
+	}
+	var n int
+	if err := database.QueryRow("SELECT COUNT(*) FROM servers").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("the refusal changed the inventory: %d servers, want 1", n)
+	}
+}
+
+// The counts partial is what keeps the sidebar honest after an in-place swap.
+func TestSidebarCountsRendersOnlyTheNav(t *testing.T) {
+	ts, _, _ := newTestServerFull(t)
+	client := authedClient(t, ts)
+	createServer(t, client, ts, "counts-01")
+
+	resp, err := client.Get(ts.URL + "/partials/counts?nav=servers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readBody(t, resp)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if !strings.Contains(body, `id="sidebar-nav"`) {
+		t.Error("the nav block did not render")
+	}
+	if !strings.Contains(body, `class="nav-item active" href="/servers"`) {
+		t.Error("the ?nav= hint did not mark the current page")
+	}
+	if strings.Contains(body, "<html") {
+		t.Error("only the nav block should be rendered, not a page")
+	}
+}

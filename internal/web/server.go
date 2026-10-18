@@ -27,6 +27,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"idlerthing/internal/model"
@@ -80,6 +81,18 @@ type Server struct {
 	pmapiURL string
 	sshPoll  func(context.Context, *model.Seedbox) (string, error)
 
+	// pmSyncing serialises fleet syncs so a burst of clicks cannot launch
+	// several fetches at once (the provider rate-limits by key). Per-Server
+	// like every other mutable state here — package globals would let one
+	// test's in-flight sync block an unrelated Server in another.
+	pmSyncMu  sync.Mutex
+	pmSyncing bool
+
+	// bootstrapFile is the path holding the generated first-run admin
+	// password (see main.go's seedAdmin). It is deleted as soon as anyone
+	// signs in successfully, so the credential stops sitting on disk.
+	bootstrapFile string
+
 	// AGPL §13 texts, injected from package main (go:embed cannot reach the
 	// repo root from here) — see legal.go.
 	license    []byte
@@ -120,6 +133,13 @@ func New(db *sql.DB) (*Server, error) {
 // SetSecret overrides the yabs ingest HMAC key.
 func (s *Server) SetSecret(secret []byte) {
 	s.secret = secret
+}
+
+// SetBootstrapPasswordFile points the login path at the file holding the
+// generated first-run admin password; it is removed on the first successful
+// sign-in. Empty (the default) disables the cleanup.
+func (s *Server) SetBootstrapPasswordFile(path string) {
+	s.bootstrapFile = path
 }
 
 // SetBehindTLSProxy marks the app as behind an HTTPS-terminating proxy.
@@ -311,6 +331,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /servers/{id}/yabs/{yid}", s.protect(http.HandlerFunc(s.handleServerYABSDetail)))
 	mux.Handle("POST /servers/{id}/yabs/{yid}/delete", s.protect(http.HandlerFunc(s.handleServerYABSDelete)))
 	mux.Handle("POST /tools/ping", s.protect(http.HandlerFunc(s.handlePing)))
+
+	// Fallback target for every destructive form whose confirmation only htmx
+	// can provide (see handleJSRequired).
+	mux.Handle("POST /js-required", s.protect(http.HandlerFunc(s.handleJSRequired)))
+	// Re-rendered after an in-place htmx swap so the sidebar counts catch up.
+	mux.Handle("GET /partials/counts", s.protect(http.HandlerFunc(s.handleSidebarCounts)))
 
 	return s.recoverMiddleware(s.securityHeaders(s.loadSession(mux)))
 }

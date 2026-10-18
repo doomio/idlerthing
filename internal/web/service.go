@@ -19,6 +19,7 @@ package web
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -187,7 +188,7 @@ func (s *Server) handleSectionDelete(w http.ResponseWriter, r *http.Request, sec
 	if err := sec.Delete(r.Context(), id); err != nil {
 		// Already gone (second tab, double-click, htmx retry) is a 404 like
 		// every other missing-row path, not a 500.
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
 		}
@@ -212,7 +213,7 @@ func (s *Server) handleSectionDetail(w http.ResponseWriter, r *http.Request, sec
 		return
 	}
 	view, err := sec.Detail(r, id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}

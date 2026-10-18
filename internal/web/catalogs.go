@@ -57,10 +57,10 @@ func (s *Server) newCatalogView(r *http.Request, kindStr string, kind model.Cata
 	if kindStr == "providers" {
 		view.ShowKeys = true
 		view.HasKey = map[int64]bool{}
-		ids, err := (&model.CatalogStore{DB: s.db}).ProviderIDsWithKey(r.Context())
+		providers, err := (&model.CatalogStore{DB: s.db}).ProvidersWithKey(r.Context())
 		if err == nil {
-			for _, id := range ids {
-				view.HasKey[id] = true
+			for _, p := range providers {
+				view.HasKey[p.ID] = true
 			}
 		}
 	}
@@ -133,7 +133,7 @@ func (s *Server) handleCatalogUpdate(w http.ResponseWriter, r *http.Request) {
 		errMsg = "Name is required."
 	} else if err := s.catalogs.Update(r.Context(), kind, id, name); err != nil {
 		switch {
-		case err == sql.ErrNoRows:
+		case errors.Is(err, sql.ErrNoRows):
 			errMsg = "That entry no longer exists — it may have been deleted."
 		case errors.Is(err, model.ErrConflict):
 			errMsg = "That name already exists."
@@ -225,6 +225,9 @@ func (s *Server) respondCatalogMutation(w http.ResponseWriter, r *http.Request, 
 	}
 	if errMsg == "" {
 		s.touchDashboard() // successful htmx mutations invalidate too
+		// The swap replaces only the list, so tell the page to re-fetch the
+		// sidebar counts (app.js listens for this event name).
+		w.Header().Set("HX-Trigger", "counts-changed")
 	}
 	items, err := s.catalogs.List(r.Context(), kind)
 	if err != nil {

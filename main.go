@@ -53,21 +53,23 @@ func main() {
 	// and dropping it lets the fail2ban filter anchor its patterns at ^.
 	log.SetFlags(0)
 
-	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version") {
-		fmt.Println("idlerthing", version)
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "import" {
-		if err := runImport(os.Args[2:]); err != nil {
-			slog.Error("import failed", "err", err)
-			os.Exit(1)
-		}
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "passwd" {
-		if err := runPasswd(os.Args[2:]); err != nil {
-			slog.Error("passwd failed", "err", err)
-			os.Exit(1)
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version", "--version", "-version":
+			fmt.Println("idlerthing", version)
+		case "import":
+			exitIfError("import", runImport(os.Args[2:]))
+		case "passwd":
+			exitIfError("passwd", runPasswd(os.Args[2:]))
+		case "help", "--help", "-h":
+			usage(os.Stdout)
+		default:
+			// Falling through to run() here would start a web server in
+			// response to a typo — silently, and against whatever database the
+			// operator did not mean to touch.
+			fmt.Fprintf(os.Stderr, "idlerthing: unknown command %q\n\n", os.Args[1])
+			usage(os.Stderr)
+			os.Exit(2)
 		}
 		return
 	}
@@ -75,6 +77,30 @@ func main() {
 		slog.Error("fatal", "err", err)
 		os.Exit(1)
 	}
+}
+
+func usage(w io.Writer) {
+	fmt.Fprintf(w, `usage: idlerthing [command]
+
+  (no command)              run the web server
+  import [--force] <file>   import a JSON export or MyIdlers JSON/CSV dump
+  passwd                    reset the admin password (read from stdin, or
+                            generated when attached to a terminal)
+  version                   print the build version
+  help                      show this message
+
+All commands read the same environment as the server — in particular IDLER_DB
+— which defaults to a path relative to the current directory.
+
+`)
+}
+
+func exitIfError(what string, err error) {
+	if err == nil {
+		return
+	}
+	slog.Error(what+" failed", "err", err)
+	os.Exit(1)
 }
 
 // runPasswd implements `idlerthing passwd`: resets the
@@ -105,6 +131,11 @@ func runPasswd(args []string) error {
 			return fmt.Errorf("read password from stdin: %w", err)
 		}
 		password = strings.TrimSpace(string(raw))
+	} else if out, oerr := os.Stdout.Stat(); oerr != nil || out.Mode()&os.ModeCharDevice == 0 {
+		// Generation exists for a human reading their own terminal. Anywhere
+		// else — a redirected file, CI, the service's journald stream — printing
+		// the plaintext would persist a long-lived credential, so refuse.
+		return fmt.Errorf("no password on stdin and stdout is not a terminal: pipe the password in instead")
 	} else {
 		password, err = randomPassword(16)
 		if err != nil {
@@ -140,6 +171,9 @@ func runPasswd(args []string) error {
 		return err
 	}
 	if generated {
+		// One-time print to the operator's own terminal: stdout is verified to
+		// be a character device above, so the plaintext never lands in a pipe,
+		// a redirected file, or the service's journald stream.
 		fmt.Printf("generated admin password: %s\n", password)
 	}
 	fmt.Println("admin password updated; all sessions and the API token were revoked")
@@ -158,7 +192,7 @@ func runImport(args []string) error {
 		}
 	}
 	if file == "" {
-		return fmt.Errorf("usage: idlerthing import [--force] <file.json>")
+		return fmt.Errorf("usage: idlerthing import [--force] <file> (JSON or CSV, detected from the content)")
 	}
 
 	cfg := config.Load()
@@ -255,7 +289,8 @@ func run() error {
 		return fmt.Errorf("load secret: %w", err)
 	}
 
-	if err := seedAdmin(database, cfg.AdminPassword); err != nil {
+	bootstrapFile, err := seedAdmin(database, cfg.AdminPassword, cfg.DBPath)
+	if err != nil {
 		return fmt.Errorf("seed admin: %w", err)
 	}
 	warnDenylistedPassword(database)
@@ -265,6 +300,7 @@ func run() error {
 		return fmt.Errorf("init web: %w", err)
 	}
 	webServer.SetSecret(secret)
+	webServer.SetBootstrapPasswordFile(bootstrapFile)
 	webServer.SetBehindTLSProxy(cfg.BehindTLSProxy)
 	webServer.SetAllowHTTPIngest(cfg.AllowHTTPIngest)
 	webServer.SetBaseURL(cfg.BaseURL)
@@ -302,7 +338,13 @@ func run() error {
 	// 15s: a prometheus batch can run ~12s worst case.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		// A wedged in-flight request can blow the deadline. Returning that
+		// error exits 1, which Restart=on-failure reads as a crash and uses to
+		// resurrect the process minutes after a deliberate `systemctl stop`.
+		slog.Error("graceful shutdown did not complete", "err", err)
+	}
+	return nil
 }
 
 // loadSecret returns the HMAC secret for yabs ingest URLs. IDLER_SECRET wins
@@ -398,14 +440,15 @@ func warnDenylistedPassword(db *sql.DB) {
 
 // seedAdmin creates the initial admin user when the users table is empty.
 // The password comes from cfg password if set, otherwise a random one is
-// generated and printed to stderr once.
-func seedAdmin(db *sql.DB, password string) error {
+// generated and written to dbPath+".admin-password" at 0600; the returned path
+// is handed to the web layer, which deletes the file once somebody signs in.
+func seedAdmin(db *sql.DB, password, dbPath string) (string, error) {
 	var count int
 	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
-		return err
+		return "", err
 	}
 	if count > 0 {
-		return nil
+		return "", nil
 	}
 
 	generated := false
@@ -413,32 +456,77 @@ func seedAdmin(db *sql.DB, password string) error {
 		var err error
 		password, err = randomPassword(16)
 		if err != nil {
-			return err
+			return "", err
 		}
 		generated = true
 	} else if len(password) < 8 || len(password) > 72 {
 		// Same policy as the settings UI — never silently seed a weak admin,
 		// and never let bcrypt silently truncate a >72-byte password.
-		return fmt.Errorf("IDLER_ADMIN_PASSWORD must be 8–72 bytes")
+		return "", fmt.Errorf("IDLER_ADMIN_PASSWORD must be 8–72 bytes")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if _, err := db.Exec(
 		"INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
 		"admin", "admin@localhost", string(hash),
 	); err != nil {
-		return err
+		return "", err
 	}
 
-	if generated {
-		fmt.Fprintf(os.Stderr, "First run: admin password is %s\n", password)
+	if !generated {
+		slog.Info("created admin user", "email", "admin@localhost")
+		return "", nil
 	}
-	slog.Info("created admin user", "email", "admin@localhost")
-	return nil
+	path, err := writeBootstrapPassword(dbPath, password)
+	if err != nil {
+		// The admin row is already committed, so this install needs a password
+		// reset — but printing the plaintext instead would park a live
+		// credential in the journal, which retention, the systemd-journal
+		// group, and any log forwarder all keep far longer than this file.
+		return "", fmt.Errorf("%w — then run `idlerthing passwd` to set the admin password", err)
+	}
+	fmt.Fprintf(os.Stderr,
+		"First run: the admin password is in %s — read it, sign in, and the file is removed automatically.\n", path)
+	slog.Info("created admin user", "email", "admin@localhost", "bootstrap_password_file", path)
+	return path, nil
+}
+
+// writeBootstrapPassword stores a generated admin password next to the DB at
+// 0600 and returns its path, following the same discipline as loadSecret.
+func writeBootstrapPassword(dbPath, password string) (string, error) {
+	path := dbPath + ".admin-password"
+	// O_EXCL so a leftover file is never silently truncated over — the
+	// operator deletes it to deliberately regenerate.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("create password file: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			os.Remove(path)
+		}
+	}()
+	if _, err := f.WriteString(password + "\n"); err != nil {
+		f.Close()
+		return "", fmt.Errorf("write password file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("write password file: %w", err)
+	}
+	// The umask can widen O_CREATE's mode, so set it and verify.
+	if err := os.Chmod(path, 0o600); err != nil {
+		return "", fmt.Errorf("chmod password file: %w", err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		return "", fmt.Errorf("password file %s must be 0600", path)
+	}
+	cleanup = false
+	return path, nil
 }
 
 // randomPassword returns a random URL-safe password of n characters.
