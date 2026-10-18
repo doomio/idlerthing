@@ -47,6 +47,7 @@ type hostingConfig struct {
 	store     hostingStorer
 }
 
+// sharedConfig returns the hostingConfig for the shared hosting section.
 func (s *Server) sharedConfig() *hostingConfig {
 	return &hostingConfig{
 		base: "/shared", kind: "shared", title: "Shared Hosting",
@@ -55,6 +56,7 @@ func (s *Server) sharedConfig() *hostingConfig {
 	}
 }
 
+// resellerConfig returns the hostingConfig for the reseller hosting section.
 func (s *Server) resellerConfig() *hostingConfig {
 	return &hostingConfig{
 		base: "/reseller", kind: "reseller", title: "Reseller Hosting",
@@ -297,6 +299,7 @@ func (s *Server) handleHostingEdit(w http.ResponseWriter, r *http.Request, cfg *
 	})
 }
 
+// renderHostingForm renders the shared new/edit form for cfg's section.
 func (s *Server) renderHostingForm(w http.ResponseWriter, r *http.Request, cfg *hostingConfig, view hostingFormView) {
 	if view.Providers == nil {
 		view.Providers, _ = s.catalogs.List(r.Context(), model.Catalogs["providers"])
@@ -392,6 +395,7 @@ func parseHostingForm(r *http.Request) (*model.SharedHosting, *model.Pricing, ma
 	return h, parsePricingForm(r, errs), errs
 }
 
+// yesNo renders a bool as "Yes"/"No" for display.
 func yesNo(b bool) string {
 	if b {
 		return "Yes"

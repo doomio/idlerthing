@@ -83,6 +83,7 @@ const yabsColumns = `id, server_id, run_at, cpu, cpu_cores, ram, swap, distro,
 	kernel, uptime, geekbench_version, gb_single, gb_multi, gb_url, payload_hash,
 	created_at, updated_at`
 
+// scanYABS scans one yabsColumns row into a YABS.
 func scanYABS(row interface{ Scan(...any) error }) (*YABS, error) {
 	var y YABS
 	err := row.Scan(&y.ID, &y.ServerID, &y.RunAt, &y.CPU, &y.CPUCores, &y.RAM,
@@ -219,6 +220,7 @@ func (st *YABSStore) Get(ctx context.Context, id int64) (*YABS, []YABSDiskSpeed,
 	return y, disks, network, nil
 }
 
+// diskSpeeds returns the disk speed rows for one run.
 func (st *YABSStore) diskSpeeds(ctx context.Context, yabsID int64) ([]YABSDiskSpeed, error) {
 	rows, err := QuerierFrom(ctx, st.DB).QueryContext(ctx,
 		"SELECT id, yabs_id, block_size, read_mbps, write_mbps FROM yabs_disk_speed WHERE yabs_id = ? ORDER BY id", yabsID)
@@ -237,6 +239,7 @@ func (st *YABSStore) diskSpeeds(ctx context.Context, yabsID int64) ([]YABSDiskSp
 	return out, rows.Err()
 }
 
+// networkSpeeds returns the network speed rows for one run.
 func (st *YABSStore) networkSpeeds(ctx context.Context, yabsID int64) ([]YABSNetworkSpeed, error) {
 	rows, err := QuerierFrom(ctx, st.DB).QueryContext(ctx,
 		"SELECT id, yabs_id, location, provider, COALESCE(mode, ''), send_mbps, recv_mbps, latency_ms FROM yabs_network_speed WHERE yabs_id = ? ORDER BY id", yabsID)
@@ -281,6 +284,7 @@ func (st *YABSStore) ListAll(ctx context.Context) ([]YABSListItem, error) {
 	return scanYABSList(rows)
 }
 
+// scanYABSList scans the rows of a yabs-list query into YABSListItems.
 func scanYABSList(rows *sql.Rows) ([]YABSListItem, error) {
 	var out []YABSListItem
 	for rows.Next() {

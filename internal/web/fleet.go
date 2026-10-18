@@ -252,6 +252,7 @@ func fleetTiles(boxes []fleetBox) fleetTotals {
 	return t
 }
 
+// isCancelledRequest reports whether the request carries ?cancelled=1.
 func isCancelledRequest(r *http.Request) bool { return r.URL.Query().Get("cancelled") == "1" }
 
 // handleSeedboxFleetSync handles POST /seedboxes/fleet/sync: fetch each keyed

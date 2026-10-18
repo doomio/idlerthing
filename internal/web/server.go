@@ -39,6 +39,8 @@ var assetsFS embed.FS
 // staticFS holds the embedded static assets subtree.
 var staticFS = mustSub(assetsFS, "assets/static")
 
+// mustSub returns the dir subtree of fsys, panicking if it does not exist
+// (the embedded asset layout is a compile-time invariant).
 func mustSub(fsys fs.FS, dir string) fs.FS {
 	sub, err := fs.Sub(fsys, dir)
 	if err != nil {
@@ -323,6 +325,8 @@ type cacheStatusWriter struct {
 	wrote bool
 }
 
+// WriteHeader records that headers were sent and sets the immutable
+// Cache-Control header for 2xx responses before delegating.
 func (w *cacheStatusWriter) WriteHeader(code int) {
 	if !w.wrote {
 		w.wrote = true
@@ -333,6 +337,8 @@ func (w *cacheStatusWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// Write implicitly sends a 200 status (via WriteHeader) before writing,
+// matching the normal http.ResponseWriter contract.
 func (w *cacheStatusWriter) Write(b []byte) (int, error) {
 	if !w.wrote {
 		w.WriteHeader(http.StatusOK)

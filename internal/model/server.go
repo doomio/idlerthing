@@ -105,6 +105,7 @@ const serverColumns = `id, hostname, server_type, os_id, provider_id, location_i
 // joined list query, where bare names would be ambiguous.
 var listColumns = prefixedColumns("s", serverColumns)
 
+// scanServer scans one serverColumns row into a Server.
 func scanServer(row interface{ Scan(...any) error }) (*Server, error) {
 	var s Server
 	var active, showPublic, hasYabs, wasPromo, transferrable int
@@ -238,6 +239,8 @@ func (st *ServerStore) Delete(ctx context.Context, id int64) error {
 	return deleteServiceTx(ctx, st.DB, "servers", ServiceServer, id)
 }
 
+// insertDisksTx inserts the disk rows for one server, skipping non-positive
+// sizes and defaulting a blank media to SSD.
 func insertDisksTx(ctx context.Context, tx *sql.Tx, serverID int64, disks []ServerDisk) error {
 	for _, d := range disks {
 		if d.SizeAsMB <= 0 {
@@ -421,6 +424,7 @@ func (st *ServerStore) DistinctLocations(ctx context.Context) (int, error) {
 	return n, err
 }
 
+// boolToInt converts a bool to the 0/1 ints the schema stores booleans as.
 func boolToInt(b bool) int {
 	if b {
 		return 1

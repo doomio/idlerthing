@@ -365,10 +365,10 @@ type ipwhoIsResp struct {
 	} `json:"connection"`
 }
 
-// fetchWhois looks up one address (rate-limited, 5s timeout).
 // errWhoisThrottled means a refresh came in under the 1/s throttle.
 var errWhoisThrottled = errors.New("whois refresh throttled")
 
+// fetchWhois looks up one address (rate-limited, 5s timeout).
 func (s *Server) fetchWhois(ctx context.Context, address string) (*model.WhoisData, error) {
 	// Throttle without sleeping under the lock: too-recent calls bounce
 	// immediately instead of queueing goroutines.
@@ -510,8 +510,10 @@ type ipsIndexView struct {
 	Rows []ipIndexRow
 }
 
+// sqlNullInt wraps i as a valid NullInt64.
 func sqlNullInt(i int64) sql.NullInt64 { return sql.NullInt64{Int64: i, Valid: true} }
 
+// dateOnly truncates a timestamp string to its first 10 bytes (the date part).
 func dateOnly(s string) string {
 	if len(s) >= 10 {
 		return s[:10]

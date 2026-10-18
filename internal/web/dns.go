@@ -85,6 +85,8 @@ func dnsLinkName(it model.DNSListItem) string {
 	}
 }
 
+// dnsLinkURL returns the detail-page URL for a DNS record's linked parent
+// service ("" when it has none).
 func dnsLinkURL(it model.DNSListItem) string {
 	switch {
 	case it.ServerID.Valid:
@@ -119,6 +121,7 @@ func (s *Server) serverOptions(r *http.Request) ([]model.CatalogItem, error) {
 	return out, rows.Err()
 }
 
+// domainOptions feeds the domain link select in the DNS form.
 func (s *Server) domainOptions(r *http.Request) ([]model.CatalogItem, error) {
 	rows, err := s.db.QueryContext(r.Context(),
 		"SELECT id, domain FROM domains ORDER BY domain COLLATE NOCASE")

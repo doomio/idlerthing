@@ -163,6 +163,7 @@ func (s *Server) seedboxSection() *section {
 	}
 }
 
+// nullMbps renders a nullable port speed for display ("—" when unset).
 func nullMbps(n sql.NullInt64) string {
 	if !n.Valid {
 		return "—"
@@ -189,6 +190,7 @@ type seedboxFormView struct {
 	StaleFeed    bool
 }
 
+// handleSeedboxNew renders GET /seedboxes/new.
 func (s *Server) handleSeedboxNew(w http.ResponseWriter, r *http.Request) {
 	s.renderSeedboxForm(w, r, seedboxFormView{
 		Action:  routeSeedboxes,
@@ -224,6 +226,7 @@ func (s *Server) feedServicesFor(r *http.Request, b *model.Seedbox) ([]model.PMS
 	return services, true
 }
 
+// handleSeedboxEdit renders GET /seedboxes/{id}/edit.
 func (s *Server) handleSeedboxEdit(w http.ResponseWriter, r *http.Request) {
 	st := &model.SeedboxStore{DB: s.db}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -248,6 +251,7 @@ func (s *Server) handleSeedboxEdit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// renderSeedboxForm renders the shared new/edit form.
 func (s *Server) renderSeedboxForm(w http.ResponseWriter, r *http.Request, view seedboxFormView) {
 	if view.Providers == nil {
 		view.Providers, _ = s.catalogs.List(r.Context(), model.Catalogs["providers"])
@@ -268,6 +272,7 @@ func (s *Server) renderSeedboxForm(w http.ResponseWriter, r *http.Request, view 
 	s.render(w, r, "seedbox_form", data)
 }
 
+// handleSeedboxCreate handles POST /seedboxes.
 func (s *Server) handleSeedboxCreate(w http.ResponseWriter, r *http.Request) {
 	b, pricing, errs := parseSeedboxForm(r)
 	applySeedboxFeedLink(r, b, sql.NullInt64{})
@@ -288,6 +293,7 @@ func (s *Server) handleSeedboxCreate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, routeSeedboxes+"/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }
 
+// handleSeedboxUpdate handles POST /seedboxes/{id}/update.
 func (s *Server) handleSeedboxUpdate(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {

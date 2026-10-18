@@ -96,11 +96,17 @@ type Usage struct {
 // decodes as 0.
 type Amount float64
 
+// UnmarshalJSON decodes a money value sent as a quoted string or a number,
+// never failing: an unparsable value decodes as 0 (see Amount).
 func (a *Amount) UnmarshalJSON(b []byte) error {
 	*a = Amount(parseAmount(strings.Trim(strings.TrimSpace(string(b)), `"`)))
 	return nil
 }
 
+// parseAmount parses a money string in various thousands/decimal-separator
+// conventions (e.g. "1,234.56", "1.234,56", "11,94") into a float64. It
+// strips stray characters and returns 0 on any parse failure or implausible
+// magnitude.
 func parseAmount(s string) float64 {
 	s = strings.Map(func(r rune) rune {
 		if r >= '0' && r <= '9' || r == '.' || r == ',' || r == '-' {

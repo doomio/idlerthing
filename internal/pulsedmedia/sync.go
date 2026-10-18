@@ -251,6 +251,8 @@ type currentPricing struct {
 	nextDue  string
 }
 
+// currentPricingTx reads the active pricing row for one seedbox (zero value,
+// no error, when none is set).
 func currentPricingTx(ctx context.Context, tx *sql.Tx, seedboxID int64) (currentPricing, error) {
 	var p currentPricing
 	var currency, due sql.NullString
@@ -313,4 +315,5 @@ func usageField[T any](s Service, f func(*Usage) T) T {
 	return f(s.Seedbox.Usage)
 }
 
+// nullString converts a string to a NullString (invalid when empty).
 func nullString(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }

@@ -52,6 +52,7 @@ const seedboxColumns = `id, title, hostname, seed_box_type, provider_id, locatio
 	port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo,
 	owned_since, created_at, updated_at, pm_service_id`
 
+// scanSeedbox scans one seedboxColumns row into a Seedbox.
 func scanSeedbox(row interface{ Scan(...any) error }) (*Seedbox, error) {
 	var b Seedbox
 	var active, showPublic, wasPromo int

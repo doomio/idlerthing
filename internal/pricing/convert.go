@@ -197,6 +197,7 @@ func ConvertUSD(amount float64, currency string, rates map[string]float64) (floa
 	return round2(amount * rate), true
 }
 
+// round2 rounds f to 2 decimal places.
 func round2(f float64) float64 {
 	return math.Round(f*100) / 100
 }

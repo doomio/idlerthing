@@ -56,6 +56,7 @@ type DNSStore struct {
 const dnsColumns = `id, hostname, dns_type, address,
 	server_id, domain_id, shared_id, reseller_id, created_at, updated_at`
 
+// scanDNS scans one dnsColumns row into a DNSRecord.
 func scanDNS(row interface{ Scan(...any) error }) (*DNSRecord, error) {
 	var d DNSRecord
 	err := row.Scan(&d.ID, &d.Hostname, &d.DNSType, &d.Address,
@@ -143,6 +144,7 @@ var dnsListSelect = `
 	LEFT JOIN shared_hosting sh ON sh.id = a.shared_id
 	LEFT JOIN reseller_hosting rh ON rh.id = a.reseller_id`
 
+// scanDNSList scans the rows of a dnsListSelect query into DNSListItems.
 func scanDNSList(rows *sql.Rows) ([]DNSListItem, error) {
 	var out []DNSListItem
 	for rows.Next() {

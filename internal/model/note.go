@@ -135,6 +135,7 @@ func (s *NoteStore) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+// scanNotes scans the rows of a notes query into Notes.
 func scanNotes(rows *sql.Rows) ([]Note, error) {
 	var out []Note
 	for rows.Next() {

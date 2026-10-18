@@ -46,6 +46,8 @@ import (
 // "dev" — a released binary must be identifiable from the binary alone.
 var version = "dev"
 
+// main dispatches the CLI subcommands (version, import, passwd) before
+// falling back to running the web server.
 func main() {
 	// journald stamps every entry, so Go's own date prefix is redundant —
 	// and dropping it lets the fail2ban filter anchor its patterns at ^.
@@ -227,6 +229,8 @@ func runImport(args []string) error {
 	return fmt.Errorf("unrecognized import format")
 }
 
+// run loads configuration, migrates the database, and serves HTTP until a
+// shutdown signal is received.
 func run() error {
 	cfg := config.Load()
 

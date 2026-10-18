@@ -312,6 +312,7 @@ type yabsRow struct {
 	GbMulti    string
 }
 
+// yabsRows converts YABS list items into display rows.
 func yabsRows(items []model.YABSListItem) []yabsRow {
 	var rows []yabsRow
 	for _, it := range items {
@@ -405,6 +406,7 @@ func (s *Server) handleServerYABSDelete(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, routeServers+"/"+strconv.FormatInt(serverID, 10)+"/yabs", http.StatusSeeOther)
 }
 
+// sqlNs converts a string to a NullString (invalid when empty).
 func sqlNs(s string) sql.NullString {
 	if s == "" {
 		return sql.NullString{}
@@ -412,6 +414,7 @@ func sqlNs(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: true}
 }
 
+// sqlNi converts an int64 to a NullInt64 (invalid when zero).
 func sqlNi(i int64) sql.NullInt64 {
 	if i == 0 {
 		return sql.NullInt64{}
@@ -419,6 +422,7 @@ func sqlNi(i int64) sql.NullInt64 {
 	return sql.NullInt64{Int64: i, Valid: true}
 }
 
+// niDisplay renders a nullable integer for display ("—" when unset).
 func niDisplay(n sql.NullInt64) string {
 	if !n.Valid {
 		return "—"
