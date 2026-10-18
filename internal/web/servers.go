@@ -18,6 +18,7 @@ package web
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -299,7 +300,7 @@ func (s *Server) handleServerDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	srv, disks, pricing, err := s.servers.Get(r.Context(), id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}
@@ -419,7 +420,7 @@ func (s *Server) handleServerEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	srv, disks, pricing, err := s.servers.Get(r.Context(), id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}
@@ -492,7 +493,7 @@ func (s *Server) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.servers.Update(r.Context(), srv, disks, pricing); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
 		}
@@ -512,7 +513,7 @@ func (s *Server) handleServerDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.servers.Delete(r.Context(), id); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
 		}

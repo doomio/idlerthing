@@ -273,7 +273,7 @@ func (s *Server) handleServerYABS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	srv, _, _, err := s.servers.Get(r.Context(), serverID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}
@@ -347,7 +347,7 @@ func (s *Server) handleServerYABSDetail(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	y, disks, network, err := (&model.YABSStore{DB: s.db}).Get(r.Context(), yabsID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}
@@ -388,7 +388,7 @@ func (s *Server) handleServerYABSDelete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := (&model.YABSStore{DB: s.db}).Delete(r.Context(), serverID, yabsID); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
 		}

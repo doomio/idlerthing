@@ -18,6 +18,7 @@ package web
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -233,7 +234,7 @@ func (s *Server) handleDNSCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	st := &model.DNSStore{DB: s.db}
 	if _, err := st.Create(r.Context(), rec); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			// Parent vanished between validation and insert.
 			s.setFlash(w, r, "err", "Linked service does not exist.")
 			redirectBack(w, r, "/dns")
@@ -256,7 +257,7 @@ func (s *Server) handleDNSEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	st := &model.DNSStore{DB: s.db}
 	rec, err := st.Get(r.Context(), id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}
@@ -289,7 +290,7 @@ func (s *Server) handleDNSUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	st := &model.DNSStore{DB: s.db}
 	if err := st.Update(r.Context(), rec); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
 		}

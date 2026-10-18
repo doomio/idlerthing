@@ -18,6 +18,7 @@ package web
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -144,7 +145,7 @@ func (s *Server) handleMiscEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, pricing, err := st.Get(r.Context(), id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}
@@ -209,7 +210,7 @@ func (s *Server) handleMiscUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	st := &model.MiscStore{DB: s.db}
 	if err := st.Update(r.Context(), m, pricing); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
 		}

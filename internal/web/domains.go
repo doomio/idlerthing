@@ -18,6 +18,7 @@ package web
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -171,7 +172,7 @@ func (s *Server) handleDomainEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, pricing, err := st.Get(r.Context(), id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
 	}
@@ -239,7 +240,7 @@ func (s *Server) handleDomainUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	st := &model.DomainStore{DB: s.db}
 	if err := st.Update(r.Context(), d, pricing); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
 		}

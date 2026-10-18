@@ -133,7 +133,7 @@ func (s *Server) handleCatalogUpdate(w http.ResponseWriter, r *http.Request) {
 		errMsg = "Name is required."
 	} else if err := s.catalogs.Update(r.Context(), kind, id, name); err != nil {
 		switch {
-		case err == sql.ErrNoRows:
+		case errors.Is(err, sql.ErrNoRows):
 			errMsg = "That entry no longer exists — it may have been deleted."
 		case errors.Is(err, model.ErrConflict):
 			errMsg = "That name already exists."

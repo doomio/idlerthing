@@ -22,6 +22,7 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -915,7 +916,7 @@ func getOrCreateCatalogTx(ctx context.Context, tx dbtx, table, nameCol, name str
 	if err == nil {
 		return id, false, nil
 	}
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, false, err
 	}
 	res, err := tx.ExecContext(ctx,

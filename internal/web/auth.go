@@ -152,7 +152,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	err = s.db.QueryRowContext(r.Context(),
 		"SELECT id, name, email, password_hash FROM users WHERE email = ?", email).
 		Scan(&u.ID, &u.Name, &u.Email, &hash)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		// Burn equivalent time to blunt user enumeration.
 		hash = string(dummyHash)
 		err = nil

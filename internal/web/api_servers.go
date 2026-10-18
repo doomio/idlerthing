@@ -305,7 +305,7 @@ func (s *Server) handleAPIServerGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload, err := s.apiServerPayload(r, id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		writeAPIError(w, http.StatusNotFound, errMsgNotFound)
 		return
 	}
@@ -366,7 +366,7 @@ func (s *Server) handleAPIServerUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	srv.ID = id
-	if err := s.servers.Update(r.Context(), srv, disks, pricing); err == sql.ErrNoRows {
+	if err := s.servers.Update(r.Context(), srv, disks, pricing); errors.Is(err, sql.ErrNoRows) {
 		writeAPIError(w, http.StatusNotFound, errMsgNotFound)
 		return
 	} else if err != nil {
@@ -389,7 +389,7 @@ func (s *Server) handleAPIServerDelete(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, errMsgNotFound)
 		return
 	}
-	if err := s.servers.Delete(r.Context(), id); err == sql.ErrNoRows {
+	if err := s.servers.Delete(r.Context(), id); errors.Is(err, sql.ErrNoRows) {
 		writeAPIError(w, http.StatusNotFound, errMsgNotFound)
 		return
 	} else if err != nil {

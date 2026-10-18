@@ -48,6 +48,13 @@ jobs:
       - name: make notices-check
         run: make notices-check
 
+      # Symbol-level known-vulnerability scan. ci.yml runs the same command as
+      # an informational job so a fresh stdlib advisory cannot redden every
+      # open PR; here it is a gate, because a tag is what operators install —
+      # and a release cannot be un-published cleanly.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   # Runs on BOTH triggers, so a dispatch proves the build still works.
   # Pure Go (modernc.org/sqlite, no cgo) cross-compiles with nothing but
   # GOARCH — no QEMU, no buildx.
