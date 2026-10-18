@@ -44,11 +44,14 @@ type fleetBox struct {
 	DiskQuotaMB int64
 	HasQuota    bool
 	DiskPct     int
+	DiskMeter   *meterView
 
-	Sent     string
-	Received string
-	CPUHours int64
-	Torrents int64
+	Sent       string
+	Received   string
+	SentMB     int64
+	ReceivedMB int64
+	CPUHours   int64
+	Torrents   int64
 
 	NextDue string
 	Monthly string
@@ -57,13 +60,16 @@ type fleetBox struct {
 // fleetTotals are the headline tiles. They count active services only: a
 // cancelled service's price is not money being spent.
 type fleetTotals struct {
-	Boxes      int
-	StorageMB  int64
-	Torrents   int64
-	CPUHours   int64
-	MonthlyUSD float64
-	NextDue    string
-	NextDueBox string
+	Boxes         int
+	StorageMB     int64
+	StorageUsedMB int64
+	SentMB        int64
+	ReceivedMB    int64
+	Torrents      int64
+	CPUHours      int64
+	MonthlyUSD    float64
+	NextDue       string
+	NextDueBox    string
 }
 
 // fleetView is the template payload.
@@ -196,6 +202,8 @@ func buildFleetBox(hostname string, svc model.PMService, diskMB sql.NullInt64, d
 		DiskQuotaMB: svc.DiskQuotaBytes / (1024 * 1024),
 		Sent:        fmtMB(svc.SentBytes / (1024 * 1024)),
 		Received:    fmtMB(svc.ReceivedBytes / (1024 * 1024)),
+		SentMB:      svc.SentBytes / (1024 * 1024),
+		ReceivedMB:  svc.ReceivedBytes / (1024 * 1024),
 		CPUHours:    svc.CPUHours,
 		Torrents:    svc.Torrents,
 	}
@@ -208,6 +216,7 @@ func buildFleetBox(hostname string, svc model.PMService, diskMB sql.NullInt64, d
 	if box.DiskQuotaMB > 0 {
 		box.HasQuota = true
 		box.DiskPct = int(box.DiskUsedMB * 100 / box.DiskQuotaMB)
+		box.DiskMeter = meter(float64(box.DiskUsedMB) * 100 / float64(box.DiskQuotaMB))
 	}
 	if monthlyUSD > 0 {
 		box.Monthly = "$" + strconv.FormatFloat(monthlyUSD, 'f', 2, 64)
@@ -224,6 +233,9 @@ func fleetTiles(boxes []fleetBox) fleetTotals {
 		}
 		t.Boxes++
 		t.StorageMB += b.DiskQuotaMB
+		t.StorageUsedMB += b.DiskUsedMB
+		t.SentMB += b.SentMB
+		t.ReceivedMB += b.ReceivedMB
 		t.Torrents += b.Torrents
 		t.CPUHours += b.CPUHours
 		if b.Monthly != "" {
