@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // liveMonFakeProm serves instant + range data for one host (live-low/a:9100).
@@ -197,5 +198,50 @@ func TestLiveMonPromDown(t *testing.T) {
 	}
 	if strings.Contains(body, "Live monitoring") {
 		t.Fatal("dead prometheus should not render the section")
+	}
+}
+
+// Each cached view carries ten sparkline strings, so the per-instance section
+// map is the heavier of the two Prometheus caches. Entries for nodes that have
+// gone away must be swept, or the map grows for the life of the process under
+// the unit's MemoryMax=128M.
+func TestLiveMonCachePrunesAgedInstances(t *testing.T) {
+	ts, database, s := newTestServerFull(t)
+	promSrv := httptest.NewServer(http.HandlerFunc(liveMonFakeProm))
+	defer promSrv.Close()
+	if _, err := database.Exec(
+		"UPDATE settings SET prometheus_enabled = 1, prometheus_url = ? WHERE id = 1",
+		promSrv.URL); err != nil {
+		t.Fatal(err)
+	}
+	client := authedClient(t, ts)
+	createServer(t, client, ts, "live-low")
+
+	// Aged entry under the SAME baseURL, so the first real fetch cannot reset
+	// the maps and erase it before the prune runs.
+	s.livemon.mu.Lock()
+	s.livemon.baseURL = promSrv.URL
+	s.livemon.at = map[string]time.Time{"ghost:9100": time.Now().Add(-2 * cacheKeep)}
+	s.livemon.v = map[string]*liveMonView{"ghost:9100": {Unavailable: true}}
+	s.livemon.inFlight = map[string]chan struct{}{}
+	s.livemon.mu.Unlock()
+
+	resp, err := client.Get(ts.URL + "/servers/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readBody(t, resp)
+	resp.Body.Close()
+	if !strings.Contains(body, "Live monitoring") {
+		t.Fatal("expected the section, otherwise nothing was stored to prune against")
+	}
+
+	s.livemon.mu.Lock()
+	defer s.livemon.mu.Unlock()
+	if _, ok := s.livemon.v["ghost:9100"]; ok {
+		t.Fatal("aged instance survived the store path")
+	}
+	if len(s.livemon.v) != 1 {
+		t.Fatalf("expected only the fetched instance, got %v", s.livemon.at)
 	}
 }

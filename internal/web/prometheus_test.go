@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"idlerthing/internal/prom"
 )
@@ -308,5 +309,45 @@ func TestPrometheusSettingsAndTestConnection(t *testing.T) {
 	resp.Body.Close()
 	if !strings.Contains(body, "Connection failed") {
 		t.Fatal("expected failure flash")
+	}
+}
+
+// The per-instance uptime map must sweep entries that aged out: a renamed or
+// decommissioned node would otherwise leave a dead key for the whole life of
+// the process, and the service unit runs at MemoryMax=128M.
+func TestUptimeCachePrunesAgedInstances(t *testing.T) {
+	ts, database, s := newTestServerFull(t)
+	promSrv := httptest.NewServer(http.HandlerFunc(fakePromHandler))
+	t.Cleanup(promSrv.Close)
+	if _, err := database.Exec(
+		"UPDATE settings SET prometheus_enabled = 1, prometheus_url = ? WHERE id = 1",
+		promSrv.URL); err != nil {
+		t.Fatal(err)
+	}
+	client := seedLiveServers(t, ts)
+
+	// Seed the aged entry under the SAME baseURL, so the first real fetch does
+	// not reset the maps and erase it before the prune gets a chance to run.
+	s.uptime.mu.Lock()
+	s.uptime.baseURL = promSrv.URL
+	s.uptime.at = map[string]time.Time{"ghost:9100": time.Now().Add(-2 * cacheKeep)}
+	s.uptime.v = map[string]float64{"ghost:9100": 1}
+	s.uptime.failed = map[string]bool{"ghost:9100": false}
+	s.uptime.mu.Unlock()
+
+	resp, err := client.Get(ts.URL + "/servers/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	readBody(t, resp)
+	resp.Body.Close()
+
+	s.uptime.mu.Lock()
+	defer s.uptime.mu.Unlock()
+	if _, ok := s.uptime.at["ghost:9100"]; ok {
+		t.Fatal("aged instance survived the store path")
+	}
+	if len(s.uptime.at) != 1 {
+		t.Fatalf("expected the fetched instance cached, got %v", s.uptime.at)
 	}
 }

@@ -297,6 +297,25 @@ type uptimeCache struct {
 	inFlight chan struct{}
 }
 
+// cacheKeep bounds how long a per-instance entry survives without a refresh.
+// Every TTL in this package is <=60s, so an entry older than this would be
+// re-fetched on its next access anyway — dropping it only reclaims memory.
+// Unbounded, these per-instance maps grow with every name the endpoint has
+// ever reported (rebuilt containers, renamed nodes) for the whole life of the
+// process, and the service unit runs at MemoryMax=128M.
+const cacheKeep = 10 * time.Minute
+
+// pruneLocked drops entries that have aged past cacheKeep. Caller holds mu.
+func (c *uptimeCache) pruneLocked(now time.Time) {
+	for instance, at := range c.at {
+		if now.Sub(at) > cacheKeep {
+			delete(c.at, instance)
+			delete(c.v, instance)
+			delete(c.failed, instance)
+		}
+	}
+}
+
 // buildLive builds the Live card for one server from pre-fetched metrics
 // (nil when not matched).
 func (s *Server) buildLive(r *http.Request, m *prom.Metrics, hostname string) *liveView {
@@ -375,6 +394,7 @@ func (s *Server) uptime30d(r *http.Request, instance string) string {
 	close(s.uptime.inFlight)
 	s.uptime.inFlight = nil
 	if stillCurrent && s.uptime.baseURL == baseURL {
+		s.uptime.pruneLocked(time.Now())
 		s.uptime.at[instance] = time.Now()
 		if err != nil {
 			s.uptime.failed[instance] = true
