@@ -263,6 +263,7 @@ type detailView struct {
 	DeleteConfirm string
 	Cards         []infoCard
 	Extras        *extrasView
+	PollURL       string
 }
 
 // ---------- Shared pricing/detail helpers ----------

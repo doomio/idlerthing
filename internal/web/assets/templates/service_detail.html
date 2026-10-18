@@ -26,6 +26,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
     </div>
   </div>
   <div class="head-actions">
+    {{if $v.PollURL}}<form method="post" action="{{$v.PollURL}}">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <button class="btn" type="submit">Poll SSH load</button>
+    </form>{{end}}
     <a class="btn" href="{{$v.EditURL}}">✎ Edit</a>
     <form method="post" action="{{$v.DeleteURL}}" hx-post="{{$v.DeleteURL}}" hx-confirm="{{$v.DeleteConfirm}}">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">

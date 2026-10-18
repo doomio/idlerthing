@@ -78,6 +78,7 @@ type Server struct {
 	// pmapiURL overrides the PulsedMedia feed endpoint (IDLER_PMAPI_URL).
 	// Empty uses the built-in URL; tests point it at a mock server.
 	pmapiURL string
+	sshPoll  func(context.Context, *model.Seedbox) (string, error)
 
 	// AGPL §13 texts, injected from package main (go:embed cannot reach the
 	// repo root from here) — see legal.go.
@@ -112,6 +113,7 @@ func New(db *sql.DB) (*Server, error) {
 		dash:      &dashboardCache{},
 		secret:    secret,
 		prom:      &promCache{},
+		sshPoll:   pollSeedboxLoad,
 	}, nil
 }
 
@@ -235,6 +237,7 @@ func (s *Server) Handler() http.Handler {
 	// parsed as an id.
 	mux.Handle("GET /seedboxes/fleet", s.protect(http.HandlerFunc(s.handleSeedboxFleet)))
 	mux.Handle("POST /seedboxes/fleet/sync", s.protect(http.HandlerFunc(s.handleSeedboxFleetSync)))
+	mux.Handle("POST /seedboxes/{id}/poll", s.protect(http.HandlerFunc(s.handleSeedboxPoll)))
 	mux.Handle("GET /seedboxes/new", s.protect(http.HandlerFunc(s.handleSeedboxNew)))
 	mux.Handle("POST /seedboxes", s.protect(http.HandlerFunc(s.handleSeedboxCreate)))
 	mux.Handle("GET /seedboxes/{id}", s.protect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.handleSectionDetail(w, r, seedboxSec) })))
