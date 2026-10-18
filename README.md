@@ -21,6 +21,9 @@ benchmarks. SQLite storage, no cgo, no external services required.
 - **Export/import** — full JSON export and CSV zip; restore with
   `idlerthing import`.
 - **YABS** — signed ingest URLs for yabs.sh results, run history and views.
+- **PulsedMedia provider** — put a read-only customer-API key on a provider
+  and its services sync into a fleet view: disk against quota, traffic,
+  CPU-hours, torrents, next renewal and monthly cost, per box and in total.
 - **Public page** — optional read-only `/public` server list.
 
 ## Quick start
@@ -106,6 +109,37 @@ sudo fail2ban-client status idlerthing
 The jail bans with the native `nftables` backend, since Debian 13 ships no
 iptables by default, and covers TCP and UDP so a ban also applies over QUIC.
 
+## PulsedMedia provider
+
+idlerthing can read the PulsedMedia customer API ("your own services"), so
+renewals, quota and live usage come from the provider instead of being typed
+in by hand.
+
+1. Create a read-only API key in the client area (`?m=pmapi`).
+2. **Providers** → paste it into the PulsedMedia row. The key is write-only:
+   it is stored, never rendered back into the page, and never exported.
+3. **Seedboxes → Fleet** → **Sync now**.
+
+Every service on the account is cached locally. A seedbox is matched to its
+service by exact hostname first, then by username, and only when the account
+has a single service as a last resort; anything genuinely ambiguous stays
+unlinked for you to pick in the **PulsedMedia service** field on the seedbox
+form. A link you set by hand is never overwritten.
+
+The sync writes only what you have not made your own. A renewal date, price or
+quota is taken from the feed while the field is empty or still holds the value
+the feed itself wrote last time, and anything you typed wins. A billing cycle
+idlerthing cannot represent leaves the price alone rather than guessing a
+monthly cost. Cancelled and suspended services sit behind a **Show cancelled**
+toggle and never count towards the totals.
+
+The fleet view reads the cache only, so a slow or failing feed never blocks a
+page; it shows when it was last synced and marks stale data.
+
+Nothing is installed on a seedbox and no connection is made to one: the feed
+is a single outbound HTTPS request to `pulsedmedia.com`. The API key reaches
+no export, no JSON API response and no unauthenticated route.
+
 ## Configuration
 
 | Variable              | Default                  | Purpose                                  |
@@ -117,6 +151,7 @@ iptables by default, and covers TCP and UDP so a ban also applies over QUIC.
 | `IDLER_BEHIND_TLS_PROXY` | *(off)*             | Set `1`/`true`/`yes` behind an HTTPS-terminating proxy: session cookies go `Secure` and the last `X-Forwarded-For` IP is trusted |
 | `IDLER_BASE_URL`      | *(none)*                 | External URL used in the YABS ingest command (default: request scheme+Host) |
 | `IDLER_ALLOW_HTTP_INGEST` | *(off)*              | Allow plain-http YABS ingest URLs on LAN hosts (loopback http and https always work) |
+| `IDLER_PMAPI_URL`     | `https://pulsedmedia.com/remote/pmapi-feed.php` | Override the PulsedMedia customer-API endpoint (for tests and mocks) |
 
 ## Backup & restore
 
@@ -234,3 +269,13 @@ make notices          # regenerate THIRD_PARTY_LICENSES.md
 make notices-check    # fail if it is stale (gates the release workflow)
 make clean
 ```
+
+README images can be regenerated with a synthetic database and a mock feed:
+
+```sh
+npm install playwright && npx playwright install chromium
+NODE_PATH=./node_modules go run ./scripts/screenshots
+```
+
+See `scripts/screenshots/README.md`. Every value it renders is invented, and it
+never touches your own database.

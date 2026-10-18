@@ -1,0 +1,116 @@
+{{/*
+idlerthing — a lightweight, self-hosted inventory for hosting services.
+Copyright (C) 2026 AlteredParadox
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+*/}}
+
+{{define "content"}}
+{{$v := .Data}}
+<header class="page-head">
+  <div>
+    <h1>PulsedMedia fleet</h1>
+    <div class="page-sub">
+      {{if $v.SyncedAt}}synced {{$v.SyncedAt}}{{else}}never synced{{end}}
+      {{if $v.Stale}}<span class="badge badge-warn">stale</span>{{end}}
+    </div>
+  </div>
+  <div class="page-actions">
+    {{if $v.ShowCancelled}}
+    <a class="btn" href="/seedboxes/fleet">Hide cancelled</a>
+    {{else}}
+    <a class="btn" href="/seedboxes/fleet?cancelled=1">Show cancelled</a>
+    {{end}}
+    <form method="post" action="/seedboxes/fleet/sync">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <button class="btn btn-primary" type="submit">Sync now</button>
+    </form>
+    <a class="btn" href="/seedboxes">All seedboxes</a>
+  </div>
+</header>
+
+{{if not $v.Configured}}
+<div class="panel empty-state">
+  <div class="empty-title">No provider API key</div>
+  <div class="empty-sub">
+    Add a PulsedMedia API key to a provider in
+    <a href="/catalogs/providers">Providers</a> to see its fleet here.
+  </div>
+</div>
+{{else}}
+
+<div class="stat-grid">
+  <div class="stat"><div class="stat-label">Boxes</div><div class="stat-value">{{$v.Totals.Boxes}}</div></div>
+  <div class="stat"><div class="stat-label">Storage</div><div class="stat-value">{{fmtMB $v.Totals.StorageMB}}</div></div>
+  <div class="stat"><div class="stat-label">Torrents</div><div class="stat-value">{{$v.Totals.Torrents}}</div></div>
+  <div class="stat"><div class="stat-label">CPU hours</div><div class="stat-value">{{$v.Totals.CPUHours}}</div></div>
+  <div class="stat">
+    <div class="stat-label">Monthly cost</div>
+    <div class="stat-value">{{if $v.Totals.MonthlyUSD}}${{printf "%.2f" $v.Totals.MonthlyUSD}}{{else}}—{{end}}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Next renewal</div>
+    <div class="stat-value">{{if $v.Totals.NextDue}}{{$v.Totals.NextDue}}{{else}}—{{end}}</div>
+    {{if $v.Totals.NextDueBox}}<div class="stat-sub mono">{{$v.Totals.NextDueBox}}</div>{{end}}
+  </div>
+</div>
+
+{{if $v.Boxes}}
+<div class="card-grid">
+  {{range $v.Boxes}}
+  <div class="panel fleet-card{{if .Cancelled}} is-muted{{end}}">
+    <div class="fleet-card-head">
+      <span class="mono">{{.Hostname}}</span>
+      {{if .Cancelled}}
+      <span class="badge badge-off">cancelled</span>
+      {{else if .Status}}
+      <span class="badge badge-ok">{{.Status}}</span>
+      {{end}}
+    </div>
+    <div class="page-sub">{{if .Product}}{{.Product}}{{else}}—{{end}}</div>
+
+    {{if .HasQuota}}
+    <div class="meter" role="img" aria-label="disk {{.DiskPct}}% used">
+      <div class="meter-fill" style="width: {{if gt .DiskPct 100}}100{{else}}{{.DiskPct}}{{end}}%"></div>
+    </div>
+    <div class="mono page-sub">{{fmtMB .DiskUsedMB}} of {{fmtMB .DiskQuotaMB}} ({{.DiskPct}}%)</div>
+    {{else if .DiskUsedMB}}
+    <div class="mono page-sub">{{fmtMB .DiskUsedMB}} used</div>
+    {{else}}
+    <div class="page-sub">no quota reported</div>
+    {{end}}
+
+    <dl class="kv">
+      <dt>Sent</dt><dd class="mono">{{.Sent}}</dd>
+      <dt>Received</dt><dd class="mono">{{.Received}}</dd>
+      <dt>CPU hours</dt><dd class="mono">{{.CPUHours}}</dd>
+      <dt>Torrents</dt><dd class="mono">{{.Torrents}}</dd>
+      <dt>Next due</dt><dd class="mono">{{if .NextDue}}{{.NextDue}}{{else}}—{{end}}</dd>
+      <dt>Monthly</dt><dd class="mono">{{if .Monthly}}{{.Monthly}}{{else}}—{{end}}</dd>
+    </dl>
+  </div>
+  {{end}}
+</div>
+{{else}}
+<div class="panel empty-state">
+  <div class="empty-title">No linked seedboxes</div>
+  <div class="empty-sub">
+    Link a seedbox to one of this provider's services from its edit page,
+    then sync.
+  </div>
+</div>
+{{end}}
+
+{{end}}
+{{end}}

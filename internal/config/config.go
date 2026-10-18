@@ -42,6 +42,9 @@ type Config struct {
 	// AllowHTTPIngest permits plain-http YABS ingest URLs on LAN hosts
 	// (RFC1918/link-local/ULA). Loopback http and https always work.
 	AllowHTTPIngest bool
+	// PMAPIURL overrides the PulsedMedia customer-API endpoint. Empty uses
+	// the built-in feed URL; set only to point at a test server.
+	PMAPIURL string
 }
 
 // Load reads configuration from environment variables, applying defaults.
@@ -54,6 +57,7 @@ func Load() Config {
 		BehindTLSProxy:  envBool("IDLER_BEHIND_TLS_PROXY"),
 		BaseURL:         os.Getenv("IDLER_BASE_URL"),
 		AllowHTTPIngest: envBool("IDLER_ALLOW_HTTP_INGEST"),
+		PMAPIURL:        os.Getenv("IDLER_PMAPI_URL"),
 	}
 }
 

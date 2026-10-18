@@ -40,18 +40,25 @@ type Seedbox struct {
 	OwnedSince    sql.NullString
 	CreatedAt     string
 	UpdatedAt     string
+
+	// PMServiceID links this seedbox to one of its provider's cached feed
+	// services. NULL when unlinked, or when it points at a service the feed
+	// no longer lists. Deliberately not a foreign key: the cache is replaced
+	// wholesale on every sync.
+	PMServiceID sql.NullInt64
 }
 
 const seedboxColumns = `id, title, hostname, seed_box_type, provider_id, location_id,
 	port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo,
-	owned_since, created_at, updated_at`
+	owned_since, created_at, updated_at, pm_service_id`
 
 func scanSeedbox(row interface{ Scan(...any) error }) (*Seedbox, error) {
 	var b Seedbox
 	var active, showPublic, wasPromo int
 	err := row.Scan(&b.ID, &b.Title, &b.Hostname, &b.SeedBoxType, &b.ProviderID,
 		&b.LocationID, &b.PortSpeed, &b.DiskAsMB, &b.BandwidthAsMB, &active,
-		&showPublic, &wasPromo, &b.OwnedSince, &b.CreatedAt, &b.UpdatedAt)
+		&showPublic, &wasPromo, &b.OwnedSince, &b.CreatedAt, &b.UpdatedAt,
+		&b.PMServiceID)
 	if err != nil {
 		return nil, err
 	}
@@ -74,11 +81,12 @@ func (st *SeedboxStore) Create(ctx context.Context, b *Seedbox, pricing *Pricing
 
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO seedboxes (title, hostname, seed_box_type, provider_id, location_id,
-			port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo, owned_since)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo,
+			owned_since, pm_service_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.Title, b.Hostname, b.SeedBoxType, b.ProviderID, b.LocationID,
 		b.PortSpeed, b.DiskAsMB, b.BandwidthAsMB, boolToInt(b.Active),
-		boolToInt(b.ShowPublic), boolToInt(b.WasPromo), b.OwnedSince)
+		boolToInt(b.ShowPublic), boolToInt(b.WasPromo), b.OwnedSince, b.PMServiceID)
 	if err != nil {
 		return 0, fmt.Errorf("insert seedbox: %w", err)
 	}
@@ -118,11 +126,12 @@ func (st *SeedboxStore) Update(ctx context.Context, b *Seedbox, pricing *Pricing
 		UPDATE seedboxes SET title = ?, hostname = ?, seed_box_type = ?,
 			provider_id = ?, location_id = ?, port_speed = ?, disk_as_mb = ?,
 			bandwidth_as_mb = ?, active = ?, show_public = ?, was_promo = ?,
-			owned_since = ?, updated_at = CURRENT_TIMESTAMP
+			owned_since = ?, pm_service_id = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`,
 		b.Title, b.Hostname, b.SeedBoxType, b.ProviderID, b.LocationID,
 		b.PortSpeed, b.DiskAsMB, b.BandwidthAsMB, boolToInt(b.Active),
-		boolToInt(b.ShowPublic), boolToInt(b.WasPromo), b.OwnedSince, b.ID)
+		boolToInt(b.ShowPublic), boolToInt(b.WasPromo), b.OwnedSince,
+		b.PMServiceID, b.ID)
 	if err != nil {
 		return fmt.Errorf("update seedbox: %w", err)
 	}
@@ -217,7 +226,7 @@ func (st *SeedboxStore) List(ctx context.Context, opts ListOptions) ([]SeedboxLi
 		err := rows.Scan(&it.ID, &it.Title, &it.Hostname, &it.SeedBoxType,
 			&it.ProviderID, &it.LocationID, &it.PortSpeed, &it.DiskAsMB,
 			&it.BandwidthAsMB, &active, &showPublic, &wasPromo, &it.OwnedSince,
-			&it.CreatedAt, &it.UpdatedAt,
+			&it.CreatedAt, &it.UpdatedAt, &it.PMServiceID,
 			&it.ProviderName, &it.LocationName, &currency, &price, &term, &due)
 		if err != nil {
 			return nil, err

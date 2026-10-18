@@ -55,6 +55,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       <a class="nav-item{{if eq .Nav "seedboxes"}} active{{end}}" href="/seedboxes">
         <span class="nav-label">SeedBoxes</span><span class="nav-count mono">{{.Counts.Seedboxes}}</span>
       </a>
+      {{if .Counts.PMFleet}}
+      <a class="nav-item" href="/seedboxes/fleet">
+        <span class="nav-label">Fleet</span><span class="nav-count mono">{{.Counts.PMFleet}}</span>
+      </a>
+      {{end}}
       <a class="nav-item{{if eq .Nav "domains"}} active{{end}}" href="/domains">
         <span class="nav-label">Domains</span><span class="nav-count mono">{{.Counts.Domains}}</span>
       </a>

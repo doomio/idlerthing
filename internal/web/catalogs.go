@@ -34,6 +34,37 @@ type catalogView struct {
 	Error      string        // inline error shown above the table (htmx swaps)
 	Counts     map[int64]int // usage counts (labels only)
 	ShowCounts bool
+
+	// Providers only: whether each row holds a PulsedMedia API key. The key
+	// itself is never read into the view, so it cannot reach the template.
+	ShowKeys bool
+	HasKey   map[int64]bool
+}
+
+// newCatalogView builds the list payload, including the per-row hints that
+// are never the secret itself: usage counts for labels, "a key is set" for
+// providers.
+func (s *Server) newCatalogView(r *http.Request, kindStr string, kind model.CatalogKind, items []model.CatalogItem, errMsg string) catalogView {
+	view := catalogView{Kind: kindStr, Title: kind.Title, Items: items, Error: errMsg}
+	if kindStr == "labels" {
+		view.ShowCounts = true
+		view.Counts = map[int64]int{}
+		counts, _ := (&model.LabelStore{DB: s.db}).AllWithCounts(r.Context())
+		for _, c := range counts {
+			view.Counts[c.ID] = c.Used
+		}
+	}
+	if kindStr == "providers" {
+		view.ShowKeys = true
+		view.HasKey = map[int64]bool{}
+		ids, err := (&model.CatalogStore{DB: s.db}).ProviderIDsWithKey(r.Context())
+		if err == nil {
+			for _, id := range ids {
+				view.HasKey[id] = true
+			}
+		}
+	}
+	return view
 }
 
 // catalogKind resolves the {kind} path value to a catalog definition.
@@ -55,15 +86,7 @@ func (s *Server) handleCatalogList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
 		return
 	}
-	view := catalogView{Kind: kindStr, Title: kind.Title, Items: items}
-	if kindStr == "labels" {
-		view.ShowCounts = true
-		view.Counts = map[int64]int{}
-		counts, _ := (&model.LabelStore{DB: s.db}).AllWithCounts(r.Context())
-		for _, c := range counts {
-			view.Counts[c.ID] = c.Used
-		}
-	}
+	view := s.newCatalogView(r, kindStr, kind, items, "")
 	data := s.newPageData(w, r, kind.Title, kindStr)
 	data.Data = view
 	s.render(w, r, "catalogs", data)
@@ -149,6 +172,44 @@ func (s *Server) handleCatalogDelete(w http.ResponseWriter, r *http.Request) {
 	s.respondCatalogMutation(w, r, kindStr, kind, errMsg)
 }
 
+// handleProviderKey handles POST /catalogs/providers/{id}/key — the write-only
+// PulsedMedia API key.
+//
+// A blank field keeps the stored key, so a save that never touched the field
+// cannot erase it; removing a key is an explicit action.
+func (s *Server) handleProviderKey(w http.ResponseWriter, r *http.Request) {
+	kindStr, kind, ok := catalogKind(r)
+	if !ok || kindStr != "providers" {
+		http.NotFound(w, r)
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	st := &model.CatalogStore{DB: s.db}
+	errMsg := ""
+	switch key := strings.TrimSpace(r.FormValue("pm_api_key")); {
+	case r.FormValue("clear_key") != "":
+		err = st.SetProviderKey(r.Context(), id, "")
+	case key == "":
+		err = nil // untouched: keep the stored key
+	default:
+		err = st.SetProviderKey(r.Context(), id, key)
+	}
+
+	switch {
+	case err == nil:
+	case errors.Is(err, sql.ErrNoRows):
+		errMsg = "That entry no longer exists — it may have been deleted."
+	default:
+		errMsg = "Save failed."
+	}
+	s.respondCatalogMutation(w, r, kindStr, kind, errMsg)
+}
+
 // respondCatalogMutation re-renders the list partial for htmx requests, or
 // redirects back to the list (with flash on error) for plain posts.
 func (s *Server) respondCatalogMutation(w http.ResponseWriter, r *http.Request, kindStr string, kind model.CatalogKind, errMsg string) {
@@ -171,6 +232,6 @@ func (s *Server) respondCatalogMutation(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	data := s.newPageData(w, r, kind.Title, kindStr)
-	data.Data = catalogView{Kind: kindStr, Title: kind.Title, Items: items, Error: errMsg}
+	data.Data = s.newCatalogView(r, kindStr, kind, items, errMsg)
 	s.renderNamed(w, "catalogs", "catalog_list", data)
 }

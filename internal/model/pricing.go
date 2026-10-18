@@ -183,6 +183,14 @@ func (s *PricingStore) Get(ctx context.Context, serviceType int, serviceID int64
 	return p, nil
 }
 
+// UpsertPricingTx inserts or updates the pricing for a service inside a
+// transaction the caller owns. It is upsertPricingTx for other packages (the
+// PulsedMedia sync writes a feed-derived price in the same transaction that
+// replaces the feed cache).
+func UpsertPricingTx(ctx context.Context, tx *sql.Tx, serviceType int, serviceID int64, p *Pricing) error {
+	return upsertPricingTx(ctx, tx, serviceType, serviceID, p)
+}
+
 // upsertPricingTx inserts or updates the pricing for a service within a
 // transaction. Inactive rows are import-preserved history (see
 // PricingStore.Get). Semantics:

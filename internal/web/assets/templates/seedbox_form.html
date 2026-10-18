@@ -98,6 +98,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
         </select>
         <a class="field-hint" href="/catalogs/locations" target="_blank">+ New location</a>
       </label>
+      {{if or $v.FeedServices $v.StaleFeed}}
+      {{/* Only offered when the provider holds an API key and has a cached
+           feed. Selecting nothing unlinks; a link the feed no longer lists
+           is kept visible so an unrelated save cannot drop it. */}}
+      <label class="field">
+        <span class="field-label">PulsedMedia service</span>
+        <select name="pm_service_id">
+          <option value="">— not linked</option>
+          {{range $v.FeedServices}}
+          <option value="{{.ServiceID}}" {{if eq $b.PMServiceID.Int64 .ServiceID}}selected{{end}}>{{if .Product}}{{.Product}}{{else}}service {{.ServiceID}}{{end}}{{if .Username}} ({{.Username}}){{end}}</option>
+          {{end}}
+          {{if $v.StaleFeed}}
+          <option value="{{$b.PMServiceID.Int64}}" selected>#{{$b.PMServiceID.Int64}} — no longer in the feed</option>
+          {{end}}
+        </select>
+        <span class="field-hint">Live figures come from the provider's API</span>
+      </label>
+      {{end}}
     </div>
   </section>
 

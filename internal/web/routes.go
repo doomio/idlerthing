@@ -21,8 +21,10 @@ package web
 const (
 	routeServers   = "/servers"
 	routeSeedboxes = "/seedboxes"
-	routeDomains   = "/domains"
-	routeMisc      = "/misc"
-	routeNotes     = "/notes"
-	routeSettings  = "/settings"
+	// routeSeedboxFleet is the PulsedMedia fleet view over linked seedboxes.
+	routeSeedboxFleet = routeSeedboxes + "/fleet"
+	routeDomains      = "/domains"
+	routeMisc         = "/misc"
+	routeNotes        = "/notes"
+	routeSettings     = "/settings"
 )
