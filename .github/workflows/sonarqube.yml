@@ -32,11 +32,11 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    # Dependabot's event token can't read SONAR_TOKEN (GitHub scopes it to a
-    # separate dependabot secret store), and neither can a fork PR's. A scan
-    # would fail on auth alone, so skip it — ci.yml is still the gate there.
+    # Forks and repositories without a configured SONAR_TOKEN cannot
+    # authenticate; the standalone Go CI remains the required gate.
     if: >-
       github.actor != 'dependabot[bot]' &&
+      vars.SONAR_SCAN_ENABLED == 'true' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository)
     steps:
