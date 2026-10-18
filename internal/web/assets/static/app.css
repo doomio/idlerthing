@@ -281,6 +281,27 @@ h1 { font-size: 18px; font-weight: 600; margin: 0; }
 }
 .stat-value { font-size: 22px; font-weight: 600; }
 
+/* Provider fleet: reuse the app's stat cards and CSP-safe meters. */
+.fleet-stats { margin-bottom: 18px; }
+.fleet-actions, .fleet-secondary-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fleet-actions .btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-height: 36px; padding: 8px 12px; text-decoration: none; white-space: nowrap; }
+.fleet-actions form { margin: 0; }
+@media (max-width: 700px) {
+  .page-head:has(.fleet-actions) { align-items: flex-start; flex-direction: column; gap: 12px; }
+}
+.fleet-stats .stat-value small { font-size: 12px; color: var(--mut); font-weight: 400; }
+.stat-sub { margin-top: 5px; font-size: 11px; color: var(--mut); }
+.fleet-grid { grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); }
+.fleet-card { display: grid; gap: 12px; min-width: 0; }
+.fleet-card.is-muted { opacity: .7; }
+.fleet-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.fleet-host { overflow-wrap: anywhere; }
+.fleet-storage { padding: 12px; background: var(--panel2); border-radius: var(--radius); }
+.fleet-storage-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.fleet-storage .meter-track, .fleet-storage .meter-fill { height: 6px; }
+.fleet-metrics { border-top: 1px solid var(--bd); padding-top: 12px; }
+.fleet-metrics dd { text-align: right; overflow-wrap: anywhere; }
+
 /* ---------- Flash banner ---------- */
 .flash {
   border: 1px solid var(--bd);

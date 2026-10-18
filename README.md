@@ -133,15 +133,18 @@ renewals, quota and live usage come from the provider instead of being typed
 in by hand.
 
 1. Create a read-only API key in the client area (`?m=pmapi`).
-2. **Providers** → paste it into the PulsedMedia row. The key is write-only:
-   it is stored, never rendered back into the page, and never exported.
+2. **Providers** → choose the provider record for this account and paste the key
+   into its **PulsedMedia API key** field. A provider with a key is included
+   when you press **Sync now**; the provider name is not matched and there is
+   no separate checkbox. Leave the field blank to keep the key, or
+   check **clear** to disable sync. The key is write-only: it is stored, never
+   rendered back into the page, and never exported.
 3. **Seedboxes → Fleet** → **Sync now**.
 
-Every service on the account is cached locally. A seedbox is matched to its
-service by exact hostname first, then by username, and only when the account
-has a single service as a last resort; anything genuinely ambiguous stays
-unlinked for you to pick in the **PulsedMedia service** field on the seedbox
-form. A link you set by hand is never overwritten.
+Every service on the account is cached locally. A seedbox is linked
+only when its hostname uniquely matches a service domain or permanent address.
+Other seedboxes stay unlinked for you to pick in the **PulsedMedia service**
+field on the seedbox form. A link you set by hand is never overwritten.
 
 The sync writes only what you have not made your own. A renewal date, price or
 quota is taken from the feed while the field is empty or still holds the value
@@ -155,7 +158,10 @@ page; it shows when it was last synced and marks stale data.
 
 Nothing is installed on a seedbox and no connection is made to one: the feed
 is a single outbound HTTPS request to `pulsedmedia.com`. The API key reaches
-no export, no JSON API response and no unauthenticated route.
+no export, no JSON API response and no unauthenticated route. The key **is**
+stored in the SQLite database; protect the DB, its WAL/SHM files and any raw
+backups as secrets (the app sets DB/WAL/SHM permissions to 0600). Application
+JSON/CSV exports do not include the key; restore it separately if needed.
 
 ## Configuration
 
