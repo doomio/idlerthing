@@ -1,3 +1,19 @@
+// idlerthing — a lightweight, self-hosted inventory for hosting services.
+// Copyright (C) 2026 AlteredParadox
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or (at your
+// option) any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+// for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 // Screenshot driver: logs into a locally running idlerthing, configures a
 // synthetic PulsedMedia provider key, syncs the feed, and captures the pages
 // used in README.md.
@@ -70,7 +86,7 @@ async function login(page) {
 // setProviderKey fills the write-only key field on the PulsedMedia provider row.
 async function setProviderKey(page) {
   await page.goto(BASE + '/catalogs/providers', { waitUntil: WAIT });
-  const row = page.locator('tr', { hasText: 'PulsedMedia' }).first();
+  const row = page.locator('tr', { has: page.locator('input[name="name"][value="PulsedMedia"]') });
   await row.locator('input[name=pm_api_key]').fill(PMAPI_KEY);
   await row.locator('button[title="Save key"]').click();
   await page.waitForLoadState(WAIT);

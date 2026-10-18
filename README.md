@@ -26,6 +26,23 @@ benchmarks. SQLite storage, no cgo, no external services required.
   CPU-hours, torrents, next renewal and monthly cost, per box and in total.
 - **Public page** — optional read-only `/public` server list.
 
+## Demo
+
+These screenshots use invented data from the [screenshot harness](scripts/screenshots/README.md); no live account or host is shown.
+
+![PulsedMedia fleet view with storage, traffic, CPU and torrent usage](docs/screenshots/fleet.png)
+
+<details>
+<summary>More screenshots</summary>
+
+![Dashboard with sample inventory](docs/screenshots/dashboard.png)
+
+![Seedbox inventory with sample entries](docs/screenshots/seedboxes.png)
+
+![Provider settings showing a write-only API key field](docs/screenshots/providers.png)
+
+</details>
+
 ## Quick start
 
 ```sh
