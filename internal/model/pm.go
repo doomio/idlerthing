@@ -175,6 +175,46 @@ func LinkedSeedboxesTx(ctx context.Context, tx *sql.Tx, providerID int64) ([]PML
 	return out, rows.Err()
 }
 
+// PMCandidate is a provider's seedbox that has no feed link yet.
+type PMCandidate struct {
+	SeedboxID int64
+	Hostname  string
+}
+
+// UnlinkedSeedboxesTx lists a provider's seedboxes with no feed link, the only
+// rows a match may touch.
+func UnlinkedSeedboxesTx(ctx context.Context, tx *sql.Tx, providerID int64) ([]PMCandidate, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, hostname FROM seedboxes
+		WHERE provider_id = ? AND pm_service_id IS NULL
+		ORDER BY id`, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("list unlinked seedboxes: %w", err)
+	}
+	defer rows.Close()
+
+	var out []PMCandidate
+	for rows.Next() {
+		var c PMCandidate
+		if err := rows.Scan(&c.SeedboxID, &c.Hostname); err != nil {
+			return nil, fmt.Errorf("scan unlinked seedbox: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// LinkSeedboxTx stores a feed link on a seedbox.
+func LinkSeedboxTx(ctx context.Context, tx *sql.Tx, seedboxID, serviceID int64) error {
+	_, err := tx.ExecContext(ctx,
+		"UPDATE seedboxes SET pm_service_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		serviceID, seedboxID)
+	if err != nil {
+		return fmt.Errorf("link seedbox: %w", err)
+	}
+	return nil
+}
+
 // SetSeedboxDiskTx writes only the disk size of a seedbox. It is a narrow
 // write on purpose: a sync must not touch the rest of a user's seedbox row.
 func SetSeedboxDiskTx(ctx context.Context, tx *sql.Tx, seedboxID, diskMB int64) error {

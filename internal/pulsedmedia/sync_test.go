@@ -72,7 +72,9 @@ func mockFeed(t *testing.T, body string) *httptest.Server {
 // seedProviderKey creates a provider row holding key and returns its id.
 func seedProviderKey(t *testing.T, database *sql.DB, key string) int64 {
 	t.Helper()
-	res, err := database.Exec("INSERT INTO providers (name, pm_api_key) VALUES (?, ?)", "Example Host", key)
+	// Provider names are unique, so each call gets its own.
+	name := "Example Host " + key
+	res, err := database.Exec("INSERT INTO providers (name, pm_api_key) VALUES (?, ?)", name, key)
 	if err != nil {
 		t.Fatalf("seed provider: %v", err)
 	}

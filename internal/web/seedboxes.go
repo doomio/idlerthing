@@ -182,6 +182,12 @@ type seedboxFormView struct {
 	Locations  []model.CatalogItem
 	Currencies []string
 	Errors     map[string]string
+
+	// FeedServices are the cached PulsedMedia services for this seedbox's
+	// provider, empty when the provider has no API key. A linked-but-missing
+	// service (a stale id) is shown separately so a save cannot drop it.
+	FeedServices []model.PMService
+	StaleFeed    bool
 }
 
 func (s *Server) handleSeedboxNew(w http.ResponseWriter, r *http.Request) {
@@ -189,6 +195,34 @@ func (s *Server) handleSeedboxNew(w http.ResponseWriter, r *http.Request) {
 		Action:  routeSeedboxes,
 		Seedbox: &model.Seedbox{Active: true},
 	})
+}
+
+// feedServicesFor returns the cached feed services for a seedbox's provider,
+// and whether its stored link points at a service the cache no longer holds.
+// A stale link is reported rather than hidden: the form must show it so an
+// unrelated save does not silently drop it.
+func (s *Server) feedServicesFor(r *http.Request, b *model.Seedbox) ([]model.PMService, bool) {
+	if b == nil || !b.ProviderID.Valid {
+		return nil, false
+	}
+	st := &model.CatalogStore{DB: s.db}
+	hasKey, err := st.HasProviderKey(r.Context(), b.ProviderID.Int64)
+	if err != nil || !hasKey {
+		return nil, false
+	}
+	services, err := (&model.PMStore{DB: s.db}).List(r.Context(), b.ProviderID.Int64)
+	if err != nil {
+		return nil, false
+	}
+	if !b.PMServiceID.Valid || len(services) == 0 {
+		return services, false
+	}
+	for _, svc := range services {
+		if svc.ServiceID == b.PMServiceID.Int64 {
+			return services, false
+		}
+	}
+	return services, true
 }
 
 func (s *Server) handleSeedboxEdit(w http.ResponseWriter, r *http.Request) {
@@ -221,6 +255,9 @@ func (s *Server) renderSeedboxForm(w http.ResponseWriter, r *http.Request, view 
 		view.Locations, _ = s.catalogs.List(r.Context(), model.Catalogs["locations"])
 	}
 	view.Currencies = currencies
+	// Feed services are offered only for a provider that holds a key: without
+	// one there is no feed to link to.
+	view.FeedServices, view.StaleFeed = s.feedServicesFor(r, view.Seedbox)
 	title := "Add seedbox"
 	view.CancelURL = routeSeedboxes
 	if view.IsEdit {
@@ -234,6 +271,7 @@ func (s *Server) renderSeedboxForm(w http.ResponseWriter, r *http.Request, view 
 
 func (s *Server) handleSeedboxCreate(w http.ResponseWriter, r *http.Request) {
 	b, pricing, errs := parseSeedboxForm(r)
+	applySeedboxFeedLink(r, b, sql.NullInt64{})
 	if len(errs) > 0 {
 		s.renderSeedboxForm(w, r, seedboxFormView{
 			Action: routeSeedboxes, Seedbox: b, Pricing: pricing, Errors: errs,
@@ -257,7 +295,17 @@ func (s *Server) handleSeedboxUpdate(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	st := &model.SeedboxStore{DB: s.db}
+
+	// The stored link is read before parsing so a post that never carried
+	// the field keeps it rather than clearing it.
+	var stored sql.NullInt64
+	if cur, _, err := st.Get(r.Context(), id); err == nil && cur != nil {
+		stored = cur.PMServiceID
+	}
+
 	b, pricing, errs := parseSeedboxForm(r)
+	applySeedboxFeedLink(r, b, stored)
 	b.ID = id
 	if len(errs) > 0 {
 		s.renderSeedboxForm(w, r, seedboxFormView{
@@ -266,7 +314,6 @@ func (s *Server) handleSeedboxUpdate(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	st := &model.SeedboxStore{DB: s.db}
 	if err := st.Update(r.Context(), b, pricing); err != nil {
 		if err == sql.ErrNoRows {
 			http.NotFound(w, r)
@@ -281,6 +328,10 @@ func (s *Server) handleSeedboxUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseSeedboxForm parses + validates the seedbox form.
+//
+// The feed link is three-valued: absent means "unchanged" (a client or a
+// partial post that never carried the field must not silently unlink),
+// empty means "unlink", and a value links.
 func parseSeedboxForm(r *http.Request) (*model.Seedbox, *model.Pricing, map[string]string) {
 	errs := map[string]string{}
 	b := &model.Seedbox{
@@ -301,4 +352,23 @@ func parseSeedboxForm(r *http.Request) (*model.Seedbox, *model.Pricing, map[stri
 	b.BandwidthAsMB = bandwidthFormValue(r, errs, "bandwidth_as_mb", 1<<30)
 	b.OwnedSince = dateFormValue(r, errs, "owned_since")
 	return b, parsePricingForm(r, errs), errs
+}
+
+// applySeedboxFeedLink sets the feed link from the form, distinguishing an
+// absent field (keep the stored link) from an empty one (clear it).
+func applySeedboxFeedLink(r *http.Request, b *model.Seedbox, stored sql.NullInt64) {
+	if _, present := r.Form["pm_service_id"]; !present {
+		b.PMServiceID = stored
+		return
+	}
+	v := strings.TrimSpace(r.FormValue("pm_service_id"))
+	if v == "" {
+		b.PMServiceID = sql.NullInt64{}
+		return
+	}
+	if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+		b.PMServiceID = sql.NullInt64{Int64: id, Valid: true}
+		return
+	}
+	b.PMServiceID = stored
 }
