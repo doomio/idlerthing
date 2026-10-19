@@ -188,17 +188,17 @@ first read-only poll fetches `/proc/loadavg` over SSH and shows 1/5/15-minute
 host load; it does not collect CPU/RAM, I/O, qBittorrent or Docker yet. No
 background job, agent, or seedbox installation is involved.
 
-The app's OS user needs the `ssh` executable, non-interactive key-based access
-to the selected box on port 22, and a pre-verified entry for that hostname in
-`~/.ssh/known_hosts`. Strict host-key checking is required; never trust a key
-obtained from an unverified network scan. The app stores only the opt-in and
-SSH username, never a password or private key. Disabled/inactive boxes are
-never polled. A poll times out after 12 seconds and reports failure without
-showing SSH output or changing inventory. If the app runs as a systemd
-`DynamicUser`, provision its SSH identity and known_hosts via a private
-credential/home mechanism before enabling this option; the default service
-unit does not provide them. Do not enable it if the app host should have no
-network path to your boxes.
+The app's OS user needs a non-interactive, unencrypted SSH private key
+(standard `~/.ssh/id_*` files with private permissions) and a pre-verified
+entry for that hostname in `~/.ssh/known_hosts`. Strict host-key checking is
+required; never trust a key obtained from an unverified network scan. The
+app stores only the opt-in and SSH username, never a password or private key.
+Disabled/inactive boxes are never polled. A poll times out after 12 seconds
+and reports failure without showing SSH output or changing inventory. If the
+app runs as a systemd `DynamicUser`, provision its SSH identity and
+known_hosts via a private credential/home mechanism before enabling this
+option; the default service unit does not provide them. Do not enable it if
+the app host should have no network path to your boxes.
 
 ## Configuration
 

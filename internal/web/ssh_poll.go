@@ -20,20 +20,58 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
+
 	"idlerthing/internal/model"
 )
 
 const sshPollTimeout = 12 * time.Second
+
+type limitedWriter struct {
+	writer    io.Writer
+	remaining int
+}
+
+func (w *limitedWriter) Write(p []byte) (int, error) {
+	if len(p) > w.remaining {
+		return 0, errors.New("SSH response too large")
+	}
+	n, err := w.writer.Write(p)
+	w.remaining -= n
+	return n, err
+}
+
+func dialPublicSSH(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || !validSSHTarget(host) {
+		return nil, errors.New("invalid SSH address")
+	}
+	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return nil, err
+	}
+	for _, ip := range ips {
+		if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.Is4In6() || ip.IsUnspecified() {
+			return nil, errors.New("SSH target resolves to a non-public address")
+		}
+	}
+	if len(ips) == 0 {
+		return nil, errors.New("SSH target has no addresses")
+	}
+	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+	return conn, err
+}
 
 func validSSHTarget(host string) bool {
 	if host == "" || strings.EqualFold(host, "localhost") || strings.HasSuffix(strings.ToLower(host), ".localhost") || strings.HasSuffix(strings.ToLower(host), ".local") {
@@ -58,8 +96,9 @@ func validSSHTarget(host string) bool {
 	return strings.Contains(host, ".")
 }
 
-// pollSeedboxLoad uses the system SSH client with strict host-key verification.
-// The host key must be enrolled in the app user's known_hosts before polling.
+// pollSeedboxLoad uses the existing Go SSH dependency with strict host-key
+// verification. The app user must have a private key and trusted known_hosts.
+// Dialing the vetted IP avoids DNS rebinding between validation and connect.
 func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
 	if b.SSHUser == "" || len(b.SSHUser) > 64 || strings.HasPrefix(b.SSHUser, "-") || strings.IndexFunc(b.SSHUser, func(c rune) bool {
 		return !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-", c)
@@ -71,19 +110,62 @@ func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
 		return "", err
 	}
 	knownHosts := filepath.Join(home, ".ssh", "known_hosts")
-	if _, err := os.Stat(knownHosts); err != nil {
+	verify, err := knownhosts.New(knownHosts)
+	if err != nil {
 		return "", errors.New("SSH known_hosts is not configured")
+	}
+	keys, err := filepath.Glob(filepath.Join(home, ".ssh", "id_*"))
+	if err != nil {
+		return "", err
+	}
+	var signers []ssh.Signer
+	for _, file := range keys {
+		if strings.HasSuffix(file, ".pub") {
+			continue
+		}
+		info, err := os.Stat(file)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+			continue
+		}
+		key, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		signer, err := ssh.ParsePrivateKey(key)
+		if err == nil {
+			signers = append(signers, signer)
+		}
+	}
+	if len(signers) == 0 {
+		return "", errors.New("SSH identity is not configured")
 	}
 	ctx, cancel := context.WithTimeout(ctx, sshPollTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ssh", "-F", "/dev/null", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile="+knownHosts,
-		"-o", "GlobalKnownHostsFile=/dev/null", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=5", "-o", "ConnectionAttempts=1",
-		"-o", "ProxyCommand=none", "-o", "ProxyJump=none", "-o", "PermitLocalCommand=no", "-o", "ClearAllForwardings=yes", "-o", "LogLevel=ERROR", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "IdentityAgent=none", "-p", "22", "--", b.SSHUser+"@"+b.Hostname, "cat /proc/loadavg")
-	out, err := cmd.Output()
+	cfg := &ssh.ClientConfig{User: b.SSHUser, Auth: []ssh.AuthMethod{ssh.PublicKeys(signers...)}, HostKeyCallback: verify, Timeout: 5 * time.Second}
+	conn, err := dialPublicSSH(ctx, "tcp", net.JoinHostPort(b.Hostname, "22"))
 	if err != nil {
-		return "", fmt.Errorf("SSH poll failed: %w", err)
+		return "", err
 	}
-	fields := strings.Fields(string(out))
+	defer conn.Close()
+	// Preserve the hostname for host-key verification even though the dial used a vetted IP.
+	clientConn, chans, reqs, err := ssh.NewClientConn(conn, net.JoinHostPort(b.Hostname, "22"), cfg)
+	if err != nil {
+		return "", err
+	}
+	client := ssh.NewClient(clientConn, chans, reqs)
+	defer client.Close()
+	session, err := client.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer session.Close()
+	var out strings.Builder
+	session.Stdout = &limitedWriter{writer: &out, remaining: 256}
+	session.Stderr = io.Discard
+	if err := session.Run("cat /proc/loadavg"); err != nil {
+		return "", err
+	}
+	fields := strings.Fields(out.String())
 	if len(fields) < 3 {
 		return "", errors.New("invalid load average response")
 	}

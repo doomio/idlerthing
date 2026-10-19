@@ -17,15 +17,47 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
+	"idlerthing/internal/importer"
 	"idlerthing/internal/model"
 )
+
+func TestSSHPollExportImportRoundTrip(t *testing.T) {
+	ts, db, _ := newTestServerFull(t)
+	_, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := authedClient(t, ts)
+	resp, err := client.Get(ts.URL + "/export/json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte(`"ssh_poll_enabled":true`)) || !bytes.Contains(body, []byte(`"ssh_user":"demo"`)) {
+		t.Fatal("SSH opt-in absent from export")
+	}
+	restored := freshDB(t)
+	if _, err := importer.Import(t.Context(), restored, bytes.NewReader(body), false); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := (&model.SeedboxStore{DB: restored}).Get(t.Context(), 1)
+	if err != nil || !b.SSHPollEnabled || b.SSHUser != "demo" {
+		t.Fatalf("SSH opt-in lost on restore: %+v %v", b, err)
+	}
+}
 
 func TestOptionalSSHPollDefaultsOff(t *testing.T) {
 	_, db, srv := newTestServerFull(t)
@@ -92,6 +124,20 @@ func TestSSHPollRouteRequiresCSRF(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusSeeOther {
 		t.Fatalf("CSRF-less poll allowed: %d", resp.StatusCode)
+	}
+}
+
+func TestSSHPollOutputBound(t *testing.T) {
+	var out strings.Builder
+	w := &limitedWriter{writer: &out, remaining: 8}
+	if _, err := w.Write([]byte("0.1 0.2")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte(strings.Repeat("x", 1024))); err == nil {
+		t.Fatal("unbounded SSH response")
+	}
+	if out.String() != "0.1 0.2" {
+		t.Fatal("overflow altered output")
 	}
 }
 
