@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -31,16 +32,20 @@ func TestMigrationVersionsUnique(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen := map[string]string{}
+	seen := map[int]string{}
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".sql") {
 			continue
 		}
 		prefix, _, _ := strings.Cut(entry.Name(), "_")
-		if prior := seen[prefix]; prior != "" {
-			t.Fatalf("migration version %s reused by %s and %s", prefix, prior, entry.Name())
+		version, err := strconv.Atoi(prefix)
+		if err != nil {
+			t.Fatal(err)
 		}
-		seen[prefix] = entry.Name()
+		if prior := seen[version]; prior != "" {
+			t.Fatalf("migration version %d reused by %s and %s", version, prior, entry.Name())
+		}
+		seen[version] = entry.Name()
 	}
 }
 
