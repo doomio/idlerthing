@@ -92,6 +92,25 @@ func parseAccountQuotaUsed(token string) (int64, error) {
 	return int64(v * multiplier), nil
 }
 
+func accountQuotaSummary(raw string) (string, error) {
+	fields := strings.Fields(raw)
+	if len(fields) < 7 {
+		return "", errors.New("invalid account quota")
+	}
+	usedBytes, err := parseAccountQuotaUsed(fields[1])
+	if err != nil {
+		return "", err
+	}
+	softBytes, err := parseAccountQuotaUsed(fields[2])
+	if err != nil {
+		return "", err
+	}
+	if softBytes == 0 {
+		return "Account disk used: " + strconv.FormatInt(usedBytes/(1024*1024), 10) + " MiB (quota not set)", nil
+	}
+	return "Account disk used / soft quota: " + strconv.FormatInt(usedBytes/(1024*1024), 10) + " / " + strconv.FormatInt(softBytes/(1024*1024), 10) + " MiB", nil
+}
+
 func parseSSHAccountSnapshot(raw string, b *model.Seedbox) (string, error) {
 	if len(raw) == 0 || len(raw) > 1024 {
 		return "", errors.New("invalid account snapshot")
@@ -106,27 +125,17 @@ func parseSSHAccountSnapshot(raw string, b *model.Seedbox) (string, error) {
 	}
 	var results []string
 	if b.SSHQuotaMetrics {
-		rawQuota := values["quota"]
-		if rawQuota == "" {
-			rawQuota = values["quota_file"]
+		quota := "Account disk quota unavailable"
+		for _, key := range []string{"quota", "quota_file"} {
+			if values[key] == "" {
+				continue
+			}
+			if summary, err := accountQuotaSummary(values[key]); err == nil {
+				quota = summary
+				break
+			}
 		}
-		if rawQuota != "" {
-			fields := strings.Fields(rawQuota)
-			if len(fields) < 7 {
-				return "", errors.New("invalid account quota")
-			}
-			usedBytes, err := parseAccountQuotaUsed(fields[1])
-			if err != nil {
-				return "", errors.New("invalid account quota")
-			}
-			softBytes, err := parseAccountQuotaUsed(fields[2])
-			if err != nil {
-				return "", errors.New("invalid account quota")
-			}
-			results = append(results, "Account disk used / soft quota: "+strconv.FormatInt(usedBytes/(1024*1024), 10)+" / "+strconv.FormatInt(softBytes/(1024*1024), 10)+" MiB")
-		} else {
-			results = append(results, "Account disk quota unavailable")
-		}
+		results = append(results, quota)
 	}
 	if b.SSHTrafficMetrics {
 		if values["traffic_limit"] == "" {
@@ -134,19 +143,21 @@ func parseSSHAccountSnapshot(raw string, b *model.Seedbox) (string, error) {
 		} else {
 			limit, err := strconv.ParseFloat(values["traffic_limit"], 64)
 			if err != nil || math.IsNaN(limit) || math.IsInf(limit, 0) || limit < 0 || limit > 1e9 {
-				return "", errors.New("invalid account traffic limit")
-			}
-			bonus := 0.0
-			if values["bonus_traffic"] != "" {
-				bonus, err = strconv.ParseFloat(values["bonus_traffic"], 64)
-				if err != nil || math.IsNaN(bonus) || math.IsInf(bonus, 0) || bonus < 0 || bonus > 1e9 {
-					return "", errors.New("invalid account traffic bonus")
+				results = append(results, "Traffic limit unavailable")
+			} else {
+				bonus := 0.0
+				if values["bonus_traffic"] != "" {
+					bonus, err = strconv.ParseFloat(values["bonus_traffic"], 64)
+					if err != nil || math.IsNaN(bonus) || math.IsInf(bonus, 0) || bonus < 0 || bonus > 1e9 {
+						bonus = 0
+					}
 				}
+				throttle := values["throttled"]
+				if throttle != "0" && throttle != "1" {
+					throttle = "unknown"
+				}
+				results = append(results, "Traffic limit: "+strconv.FormatFloat(limit+min(bonus, limit), 'f', -1, 64)+" GiB; throttled: "+throttle)
 			}
-			if values["throttled"] != "0" && values["throttled"] != "1" {
-				return "", errors.New("invalid account throttle")
-			}
-			results = append(results, "Traffic limit: "+strconv.FormatFloat(limit+min(bonus, limit), 'f', -1, 64)+" GiB; throttled: "+values["throttled"])
 		}
 	}
 	return strings.Join(results, "; "), nil

@@ -108,7 +108,16 @@ func TestAccountMetricOptInsAndParsing(t *testing.T) {
 	if result, err := parseSSHAccountSnapshot("quota=/dev/md2 1659G 2000G 2500G 12345 1000k 1250k\n", &model.Seedbox{SSHQuotaMetrics: true}); err != nil || !strings.Contains(result, "1698816 / 2048000 MiB") {
 		t.Fatalf("humanized quota: %q %v", result, err)
 	}
-	for _, raw := range []string{"", "quota=demo -1 2048 4096 1 2 3\ntraffic_limit=2.5\nbonus_traffic=0.5\nthrottled=0\n", "quota=demo 1234 2048 4096 1 2 3\ntraffic_limit=NaN\nbonus_traffic=0\nthrottled=0\n", strings.Repeat("x", 1025)} {
+	for _, tc := range []struct{ raw, want string }{
+		{"quota=warning only\nquota_file=demo 1234 2048 4096 1 2 3\n", "1 / 2 MiB"},
+		{"quota=demo 1234 0 0 1 2 3\n", "quota not set"},
+		{"quota=malformed\ntraffic_limit=2.5\nthrottled=0\n", "Traffic limit: 2.5 GiB"},
+	} {
+		if got, err := parseSSHAccountSnapshot(tc.raw, box); err != nil || !strings.Contains(got, tc.want) {
+			t.Fatalf("partial account snapshot: %q %q %v", tc.raw, got, err)
+		}
+	}
+	for _, raw := range []string{"", strings.Repeat("x", 1025)} {
 		if _, err := parseSSHAccountSnapshot(raw, box); err == nil {
 			t.Fatalf("accepted %q", raw[:min(35, len(raw))])
 		}
