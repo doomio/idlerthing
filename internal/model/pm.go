@@ -186,7 +186,7 @@ type PMCandidate struct {
 func UnlinkedSeedboxesTx(ctx context.Context, tx *sql.Tx, providerID int64) ([]PMCandidate, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, hostname FROM seedboxes
-		WHERE provider_id = ? AND pm_service_id IS NULL
+		WHERE provider_id = ? AND pm_service_id IS NULL AND pm_manual_override = 0
 		ORDER BY id`, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("list unlinked seedboxes: %w", err)

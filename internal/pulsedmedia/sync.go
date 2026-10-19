@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	neturl "net/url"
 	"strconv"
 	"time"
 
@@ -140,7 +141,16 @@ func Sync(ctx context.Context, db *sql.DB, providerID int64, key, url string, no
 	}
 	if autoAdd {
 		for _, service := range cached {
-			if service.Status != "Active" || service.Domain == "" {
+			if service.Status != "Active" || service.Username == "" {
+				continue
+			}
+			hostname := service.Domain
+			if hostname == "" {
+				if u, err := neturl.Parse(service.PermanentAddress); err == nil {
+					hostname = u.Hostname()
+				}
+			}
+			if hostname == "" {
 				continue
 			}
 			var count int
@@ -149,11 +159,11 @@ func Sync(ctx context.Context, db *sql.DB, providerID int64, key, url string, no
 			}
 			if count == 0 {
 				// Do not create duplicates of a user's unlinked inventory row.
-				if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM seedboxes WHERE provider_id = ? AND hostname = ? COLLATE NOCASE", providerID, service.Domain).Scan(&count); err != nil {
+				if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM seedboxes WHERE provider_id = ? AND hostname = ? COLLATE NOCASE", providerID, hostname).Scan(&count); err != nil {
 					return Result{}, err
 				}
 				if count == 0 {
-					if _, err := tx.ExecContext(ctx, "INSERT INTO seedboxes (hostname, provider_id, pm_service_id, active) VALUES (?, ?, ?, 1)", service.Domain, providerID, service.ServiceID); err != nil {
+					if _, err := tx.ExecContext(ctx, "INSERT INTO seedboxes (hostname, provider_id, pm_service_id, active) VALUES (?, ?, ?, 1)", hostname, providerID, service.ServiceID); err != nil {
 						return Result{}, fmt.Errorf("auto-add seedbox: %w", err)
 					}
 				}
