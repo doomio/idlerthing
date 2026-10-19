@@ -53,7 +53,7 @@ func TestDockerObservationOptIn(t *testing.T) {
 	called := false
 	run := func(_ context.Context, _ *model.Seedbox, command string, _ time.Duration, limit int) (string, error) {
 		called = true
-		if !strings.Contains(command, `--unix-socket "/run/user/$(id -u)/docker.sock"`) || !strings.Contains(command, "/containers/json?all=1") || limit > 16384 {
+		if !strings.Contains(command, `--unix-socket "$socket"`) || !strings.Contains(command, `stat -c %u "$socket"`) || !strings.Contains(command, "/containers/json?all=1") || limit > 16384 {
 			t.Fatalf("unsafe command/limit: %q %d", command, limit)
 		}
 		return `[{"State":"running"},{"State":"exited"}]`, nil
@@ -232,6 +232,16 @@ func TestDirectoryBreakdownBoundedAndPrivate(t *testing.T) {
 	}
 	if _, _, _, err := parseSSHDirectoryBreakdown("1\t./bad/name\x00"); err == nil {
 		t.Fatal("accepted nested path")
+	}
+}
+
+func TestDockerProbeSocketOwnerCheck(t *testing.T) {
+	cmd := sshDockerCommand(&model.Seedbox{SSHDockerMetrics: true})
+	if !strings.Contains(cmd, `-S "$socket"`) || !strings.Contains(cmd, `stat -c %u "$socket"`) || !strings.Contains(cmd, `id -u`) {
+		t.Fatalf("Docker probe lacks owner/type check: %q", cmd)
+	}
+	if sshDockerCommand(&model.Seedbox{}) != "" {
+		t.Fatal("disabled Docker probe selected a command")
 	}
 }
 

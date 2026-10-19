@@ -449,6 +449,13 @@ func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (sshPollResult, erro
 	return collectSSHMetricsResult(ctx, b, runSSHCommand)
 }
 
+func sshDockerCommand(b *model.Seedbox) string {
+	if !b.SSHDockerMetrics {
+		return ""
+	}
+	return `uid=$(id -u); socket="/run/user/$uid/docker.sock"; [ -S "$socket" ] && [ "$(stat -c %u "$socket")" = "$uid" ] || exit 1; curl -q --silent --show-error --fail --max-time 8 --noproxy '*' --unix-socket "$socket" 'http://localhost/v1.41/containers/json?all=1'`
+}
+
 func parseDockerSnapshot(raw string) (string, error) {
 	if len(raw) > 16384 {
 		return "", errors.New("Docker snapshot too large")
@@ -544,7 +551,7 @@ func collectSSHMetricsResult(ctx context.Context, b *model.Seedbox, run func(con
 	}
 	if b.SSHDockerMetrics {
 		// Only the authenticated account's rootless socket; fixed GET, no forwarding.
-		out, err := run(ctx, b, `curl -q --silent --show-error --fail --max-time 8 --noproxy '*' --unix-socket "/run/user/$(id -u)/docker.sock" 'http://localhost/v1.41/containers/json?all=1'`, sshPollTimeout, 16384)
+		out, err := run(ctx, b, sshDockerCommand(b), sshPollTimeout, 16384)
 		if err == nil {
 			var summary string
 			summary, err = parseDockerSnapshot(out)
