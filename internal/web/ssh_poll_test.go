@@ -115,6 +115,9 @@ func TestDirectoryCommandScopedToHome(t *testing.T) {
 	if _, err := exec.LookPath("du"); err != nil {
 		t.Skip("du unavailable")
 	}
+	if err := exec.Command("du", "--version").Run(); err != nil {
+		t.Skip("GNU du unavailable")
+	}
 	home := t.TempDir()
 	if err := os.Mkdir(filepath.Join(home, "data"), 0700); err != nil {
 		t.Fatal(err)
