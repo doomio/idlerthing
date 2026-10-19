@@ -402,3 +402,103 @@ func TestRatesStaleReportedUnusable(t *testing.T) {
 		t.Fatalf("stale data should still be returned: %v", stale)
 	}
 }
+
+// The month-end anchor (finding: clamps persisted across runs) — with
+// anchor 31 a February-stored Feb 28 advances to Mar 31, not Mar 28; the
+// anchorless fallback keeps the old clamped-day behaviour.
+func TestCatchUpAnchored(t *testing.T) {
+	must := func(s string) time.Time {
+		d, err := time.Parse(time.DateOnly, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	today := must("2026-03-01")
+	if got := catchUp(must("2026-01-31"), 1, today, 31).Format(time.DateOnly); got != "2026-03-31" {
+		t.Errorf("Jan 31 anchored: got %s, want 2026-03-31", got)
+	}
+	if got := catchUp(must("2026-02-28"), 1, today, 31).Format(time.DateOnly); got != "2026-03-31" {
+		t.Errorf("clamped Feb 28 re-anchors: got %s, want 2026-03-31", got)
+	}
+	if got := catchUp(must("2026-02-28"), 1, today, 0).Format(time.DateOnly); got != "2026-03-28" {
+		t.Errorf("anchorless fallback: got %s, want 2026-03-28", got)
+	}
+	// A genuine 28th stays a 28th.
+	if got := catchUp(must("2026-01-28"), 1, must("2026-02-01"), 28).Format(time.DateOnly); got != "2026-02-28" {
+		t.Errorf("anchor 28: got %s, want 2026-02-28", got)
+	}
+}
+
+// An explicit due-date write re-derives due_day; the rollover never touches
+// it.
+func TestUpsertDerivesDueAnchor(t *testing.T) {
+	database := testDB(t)
+	ctx := context.Background()
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := model.UpsertPricingTx(ctx, tx, model.ServiceServer, 1, &model.Pricing{
+		Currency: "USD", Price: 10, Term: model.TermMonthly,
+		NextDueDate: sql.NullString{String: "2027-01-31", Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var day sql.NullInt64
+	if err := tx.QueryRowContext(ctx, "SELECT due_day FROM pricings WHERE service_id = 1").Scan(&day); err != nil {
+		t.Fatal(err)
+	}
+	if !day.Valid || day.Int64 != 31 {
+		t.Fatalf("upsert must store the anchor day: %v", day)
+	}
+	// A NULL due date stores no anchor.
+	if err := model.UpsertPricingTx(ctx, tx, model.ServiceServer, 2, &model.Pricing{
+		Currency: "USD", Price: 10, Term: model.TermMonthly,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT due_day FROM pricings WHERE service_id = 2").Scan(&day); err != nil {
+		t.Fatal(err)
+	}
+	if day.Valid {
+		t.Fatalf("NULL due must not fabricate an anchor: %v", day)
+	}
+}
+
+// End-to-end: a Jan-31-anchored row whose stored date was clamped to Feb 28
+// advances to a 31st (or a legitimate month-end clamp), not a 28th, and the
+// anchor survives the rollover.
+func TestAdvanceDueDatesUsesAndKeepsAnchor(t *testing.T) {
+	now := time.Now()
+	last := time.Date(now.Year(), now.Month()+1, 0, 0, 0, 0, 0, now.Location()).Day()
+	if now.Day() == last && last < 31 {
+		t.Skip("today is the last day of a short month; the clamp legitimately lands here")
+	}
+	database := testDB(t)
+	ctx := context.Background()
+	if _, err := database.Exec(`
+		INSERT INTO pricings (service_id, service_type, currency, price, term, next_due_date, due_day)
+		VALUES (1, 1, 'USD', 10, 1, '2026-02-28', 31)`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := AdvanceDueDates(ctx, database); err != nil || n != 1 {
+		t.Fatalf("advance: n=%d err=%v", n, err)
+	}
+	var due string
+	var day sql.NullInt64
+	if err := database.QueryRow("SELECT next_due_date, due_day FROM pricings WHERE service_id = 1").Scan(&due, &day); err != nil {
+		t.Fatal(err)
+	}
+	d, err := time.Parse(time.DateOnly, due)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := time.Date(d.Year(), d.Month()+1, 0, 0, 0, 0, 0, d.Location()).Day(); d.Day() != min(31, last) {
+		t.Fatalf("anchored advance landed on %s, want day min(31, month length)", due)
+	}
+	if !day.Valid || day.Int64 != 31 {
+		t.Fatalf("rollover must leave the anchor alone: %v", day)
+	}
+}

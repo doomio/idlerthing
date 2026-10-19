@@ -55,12 +55,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 <div class="list-controls">
   <div class="tabs">
-    <a class="pill{{if eq $v.Status "active"}} active{{end}}" href="{{$v.StatusLink "active"}}"
-       hx-get="{{$v.StatusLink "active"}}" hx-target="#server-table-wrap" hx-swap="innerHTML" hx-push-url="true">Active ({{$v.ActiveCount}})</a>
-    <a class="pill{{if eq $v.Status "inactive"}} active{{end}}" href="{{$v.StatusLink "inactive"}}"
-       hx-get="{{$v.StatusLink "inactive"}}" hx-target="#server-table-wrap" hx-swap="innerHTML" hx-push-url="true">Inactive ({{$v.InactiveCount}})</a>
-    <a class="pill{{if eq $v.Status "all"}} active{{end}}" href="{{$v.StatusLink "all"}}"
-       hx-get="{{$v.StatusLink "all"}}" hx-target="#server-table-wrap" hx-swap="innerHTML" hx-push-url="true">All</a>
+    {{/* Tabs navigate fully: an htmx swap would replace only the table,
+         leaving the active-pill highlight and the search box below it
+         pointing at the old status. */}}
+    <a class="pill{{if eq $v.Status "active"}} active{{end}}" href="{{$v.StatusLink "active"}}">Active ({{$v.ActiveCount}})</a>
+    <a class="pill{{if eq $v.Status "inactive"}} active{{end}}" href="{{$v.StatusLink "inactive"}}">Inactive ({{$v.InactiveCount}})</a>
+    <a class="pill{{if eq $v.Status "all"}} active{{end}}" href="{{$v.StatusLink "all"}}">All</a>
     <form method="post" action="/prefs/short-hostnames" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <button type="submit" class="pill{{if $v.ShortHostnames}} active{{end}}"
@@ -68,10 +68,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
     </form>
   </div>
   <div class="controls-right">
-    <input type="search" name="q" value="{{$v.Q}}" aria-label="Search servers" placeholder="Search hostname, model, provider, OS…"
-           class="search-input"
-           hx-get="/servers?status={{$v.Status}}&sort={{$v.Sort}}&dir={{$v.Dir}}"
-           hx-trigger="keyup changed delay:300ms" hx-target="#server-table-wrap" hx-swap="innerHTML" hx-push-url="true">
+    {{/* The GET form is both the no-JS path and htmx's parameter source:
+         status rides in the hidden field, q in this input, and sort/dir
+         resolve server-side from the saved pref — so a table swap can
+         never leave a stale parameter baked into the toolbar. */}}
+    <form class="search-form" method="get" action="/servers">
+      <input type="hidden" name="status" value="{{$v.Status}}">
+      <input type="search" name="q" value="{{$v.Q}}" aria-label="Search servers" placeholder="Search hostname, model, provider, OS…"
+             class="search-input"
+             hx-get="/servers"
+             hx-trigger="keyup changed delay:300ms" hx-target="#server-table-wrap" hx-swap="innerHTML" hx-push-url="true">
+    </form>
     <details class="col-chooser">
       <summary class="btn">Columns {{$v.VisibleCount}}/{{$v.TotalCount}}</summary>
       <form method="post" action="/prefs/servers-cols" class="chooser-panel">
@@ -184,8 +191,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
           <span id="ping-srv-{{.ID}}"></span>
           <form class="ping-form" hx-post="/tools/ping" hx-target="#ping-srv-{{.ID}}" hx-swap="innerHTML">
             <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-            <input type="hidden" name="host" value="{{.Hostname}}">
-            <button class="icon-btn" type="submit" aria-label="Ping {{.Hostname}}" title="Ping">⇄</button>
+            <input type="hidden" name="host" value="{{.PingHost}}">
+            <button class="icon-btn" type="submit" aria-label="Ping {{.PingHost}}" title="Ping">⇄</button>
           </form>
           <a class="icon-btn" href="/servers/{{.ID}}/edit" aria-label="Edit {{.Hostname}}" title="Edit">✎</a>
           <form method="post" action="/js-required" hx-post="/servers/{{.ID}}/delete" hx-confirm="Delete {{.Hostname}}?">

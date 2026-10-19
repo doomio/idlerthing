@@ -261,6 +261,57 @@ func TestAPIServerBodyCap(t *testing.T) {
 	}
 }
 
+// #13 — hostname and free-text fields are length-bounded on BOTH the web form
+// and the JSON API. Unbounded input is stored verbatim in SQLite TEXT and
+// re-rendered everywhere; hostnames also have a 253-byte DNS ceiling.
+func TestServerInputLengthCaps(t *testing.T) {
+	t.Run("web form", func(t *testing.T) {
+		ts, _, _ := newTestServerFull(t)
+		client := authedClient(t, ts)
+		resp := postForm(t, client, ts, "/servers", url.Values{
+			"hostname":    {strings.Repeat("h", maxHostnameBytes+1)},
+			"server_type": {"1"},
+			"active":      {"on"},
+		})
+		defer resp.Body.Close()
+		if !strings.Contains(readBody(t, resp), "Too long") {
+			t.Fatal("an over-long hostname must be rejected on the form")
+		}
+		// Exactly at the cap still saves — the bound must not over-reject.
+		ok := postForm(t, client, ts, "/servers", url.Values{
+			"hostname":    {strings.Repeat("h", maxHostnameBytes)},
+			"server_type": {"1"},
+			"active":      {"on"},
+		})
+		defer ok.Body.Close()
+		if ok.StatusCode != http.StatusSeeOther {
+			t.Fatalf("a 253-byte hostname should be accepted, got %d", ok.StatusCode)
+		}
+	})
+
+	t.Run("api", func(t *testing.T) {
+		ts, database := newTestServer(t)
+		token := setAPIToken(t, database)
+		body := `{"hostname":"` + strings.Repeat("h", maxHostnameBytes+1) +
+			`","cpu_model":"` + strings.Repeat("c", maxTextBytes+1) + `"}`
+		req, _ := http.NewRequest("POST", ts.URL+"/api/servers", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("got %d, want 422", resp.StatusCode)
+		}
+		out := readBody(t, resp)
+		if !strings.Contains(out, `"hostname":"too long"`) || !strings.Contains(out, `"cpu_model":"too long"`) {
+			t.Fatalf("both fields should be flagged, got: %s", out)
+		}
+	})
+}
+
 // #9 — unknown export type is 404.
 func TestExportUnknownType404(t *testing.T) {
 	ts, _ := newTestServer(t)

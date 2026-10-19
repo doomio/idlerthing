@@ -81,7 +81,7 @@ the journal names the file, never the secret:
 
 ```sh
 sudo journalctl -u idlerthing | grep 'admin password'
-sudo cat /var/lib/idlerthing/data/idlerthing.admin-password
+sudo cat /var/lib/idlerthing/data/idlerthing.db.admin-password
 ```
 
 The first successful login deletes it, so read it before you sign in. If the

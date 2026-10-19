@@ -79,7 +79,12 @@ func decomposeMB(mb int64) (string, string) {
 	if mb > 0 && mb%1024 == 0 {
 		return strconv.FormatInt(mb/1024, 10), "GB"
 	}
-	if mb <= 0 {
+	if mb == 0 {
+		// A stored 0 renders as "0": leaving it blank would submit as NULL
+		// and silently clear the value on an unrelated save.
+		return "0", "MB"
+	}
+	if mb < 0 {
 		return "", "MB"
 	}
 	return strconv.FormatInt(mb, 10), "MB"

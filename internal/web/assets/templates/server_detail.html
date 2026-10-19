@@ -125,6 +125,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       <code class="mono">{{$v.YABSCommand}}</code>
       <button class="icon-btn copy-btn" type="button" data-copy="{{$v.YABSCommand}}" aria-label="Copy the ingest command" title="Copy">⧉</button>
     </div>
+    {{if $v.YABSBaseFromHost}}<div class="field-hint">This URL follows the address in your browser — set <code class="mono">IDLER_BASE_URL</code> to pin it.</div>{{end}}
     {{else}}
     <div class="empty-sub">Set <code class="mono">IDLER_BASE_URL=https://…</code> (or <code class="mono">IDLER_ALLOW_HTTP_INGEST=1</code> on a LAN) to enable the ingest command.</div>
     {{end}}
@@ -168,7 +169,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
           <td class="mono">{{.Mount}}</td>
           <td class="mono">{{.Size}}</td>
           <td class="mono">{{.Avail}}</td>
-          <td>{{template "meter" .Meter}}</td>
+          <td><span class="pct-inline">{{.Meter.Label}}</span>{{template "meter-inline" .Meter}}{{template "meter" .Meter}}</td>
         </tr>
         {{end}}
       </tbody>

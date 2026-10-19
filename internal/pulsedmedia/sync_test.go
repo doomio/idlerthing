@@ -30,6 +30,7 @@ import (
 
 	"idlerthing/internal/db"
 	"idlerthing/internal/model"
+	"idlerthing/internal/pricing"
 )
 
 func syncDB(t *testing.T) *sql.DB {
@@ -242,6 +243,88 @@ func TestSyncKeepsHumanEdit(t *testing.T) {
 	}
 	if price != 12 {
 		t.Fatalf("a human-edited price must survive, got %v", price)
+	}
+}
+
+// The dashboard's lazy due-date rollover must not read as a human edit on
+// the next sync: AdvanceDueDates writes the advanced date back into the feed
+// cache baseline, so provider corrections keep landing.
+func TestSyncAdoptsFeedDueAfterDashboardAdvance(t *testing.T) {
+	database := syncDB(t)
+	provider := seedProviderKey(t, database, "k")
+	box := seedLinkedSeedbox(t, database, provider, 101, "box1.example.net")
+	putCache(t, database, provider, prevService(provider, 101, "Monthly", "2026-01-01", 10, 0))
+	if _, err := database.Exec(`INSERT INTO pricings (service_id, service_type, currency, price, term, next_due_date)
+		VALUES (?, ?, 'EUR', 10, 1, '2026-01-01')`, box, model.ServiceSeedbox); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := pricing.AdvanceDueDates(context.Background(), database); err != nil || n != 1 {
+		t.Fatalf("advance: n=%d err=%v", n, err)
+	}
+	var advanced string
+	if err := database.QueryRow("SELECT next_due_date FROM pricings WHERE service_id = ? AND service_type = ?",
+		box, model.ServiceSeedbox).Scan(&advanced); err != nil {
+		t.Fatal(err)
+	}
+	var baseline string
+	if err := database.QueryRow("SELECT next_due FROM pm_services WHERE provider_id = ? AND service_id = 101",
+		provider).Scan(&baseline); err != nil {
+		t.Fatal(err)
+	}
+	if baseline != advanced {
+		t.Fatalf("rollover must move the merge baseline: cache=%q pricing=%q", baseline, advanced)
+	}
+
+	srv := mockFeed(t, feedJSON(svcJSON(101, "Monthly", `"10"`, "2099-01-01", 0)))
+	if _, err := Sync(context.Background(), database, provider, "k", srv.URL, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, due, _ := readPricing(t, database, box); due != "2099-01-01" {
+		t.Fatalf("feed due date frozen by the dashboard rollover: got %q, want 2099-01-01", due)
+	}
+}
+
+// A feed that briefly stops reporting the usage block must not erase the
+// quota baseline — the next real quota change still has to land.
+func TestSyncQuotaDropThenChangeStillApplies(t *testing.T) {
+	database := syncDB(t)
+	provider := seedProviderKey(t, database, "k")
+	box := seedLinkedSeedbox(t, database, provider, 101, "box1.example.net")
+
+	const q1 = int64(1) << 40
+	const q3 = int64(2) << 40
+	srv := mockFeed(t, feedJSON(svcJSON(101, "Monthly", `"10"`, "", q1)))
+	if _, err := Sync(context.Background(), database, provider, "k", srv.URL, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if disk, ok := readDisk(t, database, box); !ok || disk != q1/(1024*1024) {
+		t.Fatalf("first quota: disk=%v ok=%v", disk, ok)
+	}
+
+	noUsage := feedJSON(`{"id":101,"product":"P101","status":"Active","next_due":"",
+		"billing_cycle":"Monthly","recurring_amount":10}`)
+	srv2 := mockFeed(t, noUsage)
+	if _, err := Sync(context.Background(), database, provider, "k", srv2.URL, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if disk, ok := readDisk(t, database, box); !ok || disk != q1/(1024*1024) {
+		t.Fatalf("dropped usage must leave the inventory alone: disk=%v", disk)
+	}
+	var cachedQuota int64
+	if err := database.QueryRow("SELECT disk_quota_bytes FROM pm_services WHERE provider_id = ? AND service_id = 101",
+		provider).Scan(&cachedQuota); err != nil {
+		t.Fatal(err)
+	}
+	if cachedQuota != q1 {
+		t.Fatalf("dropped usage must keep the cache baseline: got %d, want %d", cachedQuota, q1)
+	}
+
+	srv3 := mockFeed(t, feedJSON(svcJSON(101, "Monthly", `"10"`, "", q3)))
+	if _, err := Sync(context.Background(), database, provider, "k", srv3.URL, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if disk, ok := readDisk(t, database, box); !ok || disk != q3/(1024*1024) {
+		t.Fatalf("restored quota change ignored: disk=%d, want %d", disk, q3/(1024*1024))
 	}
 }
 

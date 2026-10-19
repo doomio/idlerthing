@@ -182,7 +182,9 @@ type seedboxFormView struct {
 	Providers  []model.CatalogItem
 	Locations  []model.CatalogItem
 	Currencies []string
-	Errors     map[string]string
+	// DefaultCurrency pre-fills the currency select when no pricing exists.
+	DefaultCurrency string
+	Errors          map[string]string
 
 	// FeedServices are the cached PulsedMedia services for this seedbox's
 	// provider, empty when the provider has no API key. A linked-but-missing
@@ -259,6 +261,7 @@ func (s *Server) renderSeedboxForm(w http.ResponseWriter, r *http.Request, view 
 		view.Locations, _ = s.catalogs.List(r.Context(), model.Catalogs["locations"])
 	}
 	view.Currencies = currencies
+	view.DefaultCurrency = s.defaultCurrency(r)
 	// Feed services are offered only for a provider that holds a key: without
 	// one there is no feed to link to.
 	view.FeedServices, view.StaleFeed = s.feedServicesFor(r, view.Seedbox)

@@ -273,6 +273,49 @@ func TestServerSearchAndSort(t *testing.T) {
 	}
 }
 
+// TestListToolbarHoldsNoStaleState guards the htmx contract on the list
+// pages: table swaps replace only #<base>-table-wrap, so any state baked
+// into the toolbar (active tab, search URL params) went stale after a tab
+// or sort click. Tabs therefore navigate fully, and the search box carries
+// its status as a form field — the same form is the no-JS fallback, and
+// sort/dir resolve server-side from the saved pref.
+func TestListToolbarHoldsNoStaleState(t *testing.T) {
+	ts, _ := newTestServer(t)
+	client := authedClient(t, ts)
+
+	for _, page := range []string{"/servers", "/shared"} {
+		resp, err := client.Get(ts.URL + page)
+		if err != nil {
+			t.Fatalf("GET %s: %v", page, err)
+		}
+		body := readBody(t, resp)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s: %d", page, resp.StatusCode)
+		}
+		if !strings.Contains(body, `<form class="search-form" method="get" action="`+page+`">`) {
+			t.Errorf("%s: search input must sit in a GET form (no-JS fallback)", page)
+		}
+		if !strings.Contains(body, `<input type="hidden" name="status" value="active">`) {
+			t.Errorf("%s: search form must carry the current status as a field", page)
+		}
+		if !strings.Contains(body, `<a class="pill" href="`+page+`?status=all">All</a>`) {
+			t.Errorf("%s: tab links should be plain navigation, not htmx swaps", page)
+		}
+		// Inside the toolbar no htmx request may embed query params: a table
+		// swap re-renders only the table, leaving old status/sort/dir stuck.
+		start := strings.Index(body, `<div class="list-controls">`)
+		if start < 0 {
+			t.Fatalf("%s: no list-controls toolbar found", page)
+		}
+		rel := strings.Index(body[start:], `<div id="`)
+		toolbar := body[start : start+rel]
+		if strings.Contains(toolbar, `hx-get="`+page+`?`) {
+			t.Errorf("%s: toolbar hx-get must not embed query params (stale after swaps)", page)
+		}
+	}
+}
+
 func TestServerEditAndDelete(t *testing.T) {
 	ts, _ := newTestServer(t)
 	client := authedClient(t, ts)
