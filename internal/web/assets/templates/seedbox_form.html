@@ -126,6 +126,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       <label class="field"><span class="field-label">Enable SSH polling</span>
         <input type="checkbox" name="ssh_poll_enabled" value="on" {{if $b.SSHPollEnabled}}checked{{end}}>
       </label>
+      <label class="field"><span class="field-label">Observe qBittorrent WebUI (read-only, loopback port 8080)</span>
+        <input type="checkbox" name="qbt_enabled" value="on" {{if $b.QBTEnabled}}checked{{end}}>
+      </label>
       <label class="field"><span class="field-label">SSH username</span>
         <input type="text" name="ssh_user" value="{{$b.SSHUser}}" autocomplete="off">
         {{with index $v.Errors "ssh_user"}}<span class="field-err">{{.}}</span>{{end}}

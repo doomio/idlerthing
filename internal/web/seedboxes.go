@@ -135,9 +135,13 @@ func (s *Server) seedboxSection() *section {
 				title = b.Title.String
 			}
 			sid := strconv.FormatInt(b.ID, 10)
+			qbtPollURL := ""
 			pollURL := ""
 			if b.SSHPollEnabled && b.Active && (b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics || b.SSHQuotaMetrics || b.SSHTrafficMetrics) {
 				pollURL = routeSeedboxes + "/" + sid + "/poll"
+			}
+			if b.QBTEnabled && b.SSHPollEnabled && b.Active {
+				qbtPollURL = routeSeedboxes + "/" + sid + "/poll-qbt"
 			}
 			sshStatus := "Off"
 			if b.SSHPollEnabled {
@@ -175,6 +179,25 @@ func (s *Server) seedboxSection() *section {
 					}
 				}
 			}
+			cards := []infoCard{}
+			if b.QBTEnabled {
+				qbt := infoCard{Title: "qBittorrent observation", Pairs: []kvPair{{K: "Status", V: "Enabled (manual)"}}}
+				var result, successAt, attemptedAt, lastError string
+				err := s.db.QueryRowContext(r.Context(), `SELECT result, success_at, attempted_at, last_error FROM qbt_observations WHERE seedbox_id = ?`, id).Scan(&result, &successAt, &attemptedAt, &lastError)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return nil, err
+				}
+				if successAt != "" {
+					qbt.Pairs = append(qbt.Pairs, kvPair{K: "Last successful poll (UTC)", V: successAt}, kvPair{K: "Last result", V: result})
+				}
+				if attemptedAt != "" {
+					qbt.Pairs = append(qbt.Pairs, kvPair{K: "Last attempt (UTC)", V: attemptedAt})
+				}
+				if lastError != "" {
+					qbt.Pairs = append(qbt.Pairs, kvPair{K: "Last error", V: lastError})
+				}
+				cards = append(cards, qbt)
+			}
 			return &detailView{
 				Title:         title,
 				Mono:          true,
@@ -183,7 +206,8 @@ func (s *Server) seedboxSection() *section {
 				DeleteURL:     routeSeedboxes + "/" + sid + "/delete",
 				DeleteConfirm: "Delete " + b.Hostname + "?",
 				PollURL:       pollURL,
-				Cards: []infoCard{
+				QBTPollURL:    qbtPollURL,
+				Cards: append([]infoCard{
 					{Title: "Service", Pairs: []kvPair{
 						kvs("Title", b.Title),
 						{K: "Hostname", V: b.Hostname, Mono: true},
@@ -201,7 +225,7 @@ func (s *Server) seedboxSection() *section {
 					}},
 					{Title: "Pricing", Pairs: pricingPairs(pricing), Empty: "No pricing attached."},
 					observation,
-				},
+				}, cards...),
 			}, nil
 		},
 	}
@@ -402,11 +426,12 @@ func parseSeedboxForm(r *http.Request) (*model.Seedbox, *model.Pricing, map[stri
 		SSHDirectoryMetrics: r.FormValue("ssh_directory_metrics") != "",
 		SSHQuotaMetrics:     r.FormValue("ssh_quota_metrics") != "",
 		SSHTrafficMetrics:   r.FormValue("ssh_traffic_metrics") != "",
+		QBTEnabled:          r.FormValue("qbt_enabled") != "",
 	}
 	if b.Hostname == "" {
 		errs["hostname"] = "Hostname is required."
 	}
-	if (b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics || b.SSHQuotaMetrics || b.SSHTrafficMetrics) && !b.SSHPollEnabled {
+	if (b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics || b.SSHQuotaMetrics || b.SSHTrafficMetrics || b.QBTEnabled) && !b.SSHPollEnabled {
 		errs["ssh_poll_enabled"] = "Enable SSH polling before selecting metrics."
 	}
 	if b.SSHPollEnabled && b.SSHUser == "" {
