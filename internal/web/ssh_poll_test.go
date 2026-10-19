@@ -292,6 +292,13 @@ func TestDirectoryOnlyPollOptIn(t *testing.T) {
 	}
 }
 
+func TestAccountQuotaInvalidRowDoesNotMaskTraffic(t *testing.T) {
+	got, err := parseSSHAccountSnapshot("quota=malformed\ntraffic_limit=2.5\nthrottled=0\n", &model.Seedbox{SSHQuotaMetrics: true, SSHTrafficMetrics: true})
+	if err != nil || !strings.Contains(got, "Account disk quota unavailable") || !strings.Contains(got, "Traffic limit: 2.5 GiB") {
+		t.Fatalf("partial metric: %q %v", got, err)
+	}
+}
+
 func TestAccountOnlyPollOptIn(t *testing.T) {
 	_, db, srv := newTestServerFull(t)
 	id, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHQuotaMetrics: true}, nil)
