@@ -189,14 +189,18 @@ Seedboxes remain passive unless you opt a box in under **Edit seedbox →
 Optional SSH polling** and press **Poll SSH metrics** on its detail page.
 Manual read-only polling fetches only the host load and memory metrics you
 select. Separate account disk-quota and traffic-limit/throttle options read
-only the chosen PMSS accounting files. A separate directory option measures
-top-level entries within the
-SSH account's home with low I/O priority and returns an aggregate count and
-size; the whole manual poll has a two-minute deadline. The latest result,
-UTC attempt time and a generic failure state remain on the seedbox detail
-page after refresh; raw directory names are not retained. No CPU utilization
-percentage is implied by the load average. It does not collect per-box I/O,
-qBittorrent, Docker or background polling yet. No background job, agent, or
+only the chosen PMSS accounting files. The directory option measures
+and privately retains the largest top-level home entries (up to 500) and an
+aggregate remainder; directory names stay out of JSON/CSV exports. The
+rootless Docker option reads container counts through the SSH account's
+socket, requiring remote `curl`. A separate manual qBittorrent observation
+reads torrent count and rates from an SSH-account-owned localhost WebUI on
+port 8080; it requires localhost authentication bypass and sends no WebUI
+credentials. If authentication is required, observation is unavailable.
+The whole manual SSH poll has a two-minute deadline. The latest result, UTC
+attempt time and a generic failure state remain on the seedbox detail page
+after refresh. No CPU utilization percentage is implied by the load average.
+It does not collect per-box disk I/O or poll in the background. No agent or
 seedbox installation is involved.
 
 The app's OS user needs a non-interactive, unencrypted SSH private key
