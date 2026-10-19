@@ -30,6 +30,79 @@ import (
 	"idlerthing/internal/model"
 )
 
+func TestParseQBTMainData(t *testing.T) {
+	if n, err := parseQBTMainData([]byte(`{"torrents":{"a":{"name":"synthetic"},"b":{}}}`)); err != nil || n != 2 {
+		t.Fatalf("count=%d err=%v", n, err)
+	}
+	for _, raw := range [][]byte{[]byte("bad"), []byte(strings.Repeat("x", 1<<20+1))} {
+		if _, err := parseQBTMainData(raw); err == nil {
+			t.Fatal("accepted invalid qbt response")
+		}
+	}
+}
+
+func TestQBTObservationExportImport(t *testing.T) {
+	ts, db, _ := newTestServerFull(t)
+	_, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHQBTMetrics: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := authedClient(t, ts)
+	resp, err := client.Get(ts.URL + "/export/json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte(`"ssh_qbt_metrics":true`)) {
+		t.Fatal("qbt opt-in absent from export")
+	}
+	restored := freshDB(t)
+	if _, err := importer.Import(t.Context(), restored, bytes.NewReader(body), false); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := (&model.SeedboxStore{DB: restored}).Get(t.Context(), 1)
+	if err != nil || !b.SSHQBTMetrics {
+		t.Fatalf("qbt opt-in lost: %+v %v", b, err)
+	}
+}
+
+func TestQBTObservationOptInDefaultsOff(t *testing.T) {
+	_, db, _ := newTestServerFull(t)
+	id, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := (&model.SeedboxStore{DB: db}).Get(t.Context(), id)
+	if err != nil || b.SSHQBTMetrics {
+		t.Fatalf("qbt enabled by default: %+v %v", b, err)
+	}
+}
+
+func TestQBTObservationDisabledNeverCallsRemote(t *testing.T) {
+	_, db, srv := newTestServerFull(t)
+	id, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHHostMetrics: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.sshPoll = func(_ context.Context, b *model.Seedbox) (string, error) {
+		if b.SSHQBTMetrics {
+			t.Fatal("qbt poll without consent")
+		}
+		return "Host load: 0.1", nil
+	}
+	req := httptest.NewRequest(http.MethodPost, "/seedboxes/1/poll", nil)
+	req.SetPathValue("id", "1")
+	w := httptest.NewRecorder()
+	srv.handleSeedboxPoll(w, req)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("poll: %d id=%d", w.Code, id)
+	}
+}
+
 func TestSSHPollMetricsFlagsDefaultOff(t *testing.T) {
 	_, db, _ := newTestServerFull(t)
 	id, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true}, nil)
