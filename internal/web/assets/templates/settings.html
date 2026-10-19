@@ -56,6 +56,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
           <input type="number" name="recently_added_amount" min="1" max="100" value="{{$v.RecentlyAdded}}">
           {{with index $v.Errors "recently_added_amount"}}<span class="field-err">{{.}}</span>{{end}}
         </label>
+        <label class="field"><span class="field-label">PulsedMedia sync interval (minutes)</span><input type="number" name="pm_sync_interval_minutes" min="15" max="10080" value="{{$v.PMSyncIntervalMinutes}}">{{with index $v.Errors "pm_sync_interval_minutes"}}<span class="field-err">{{.}}</span>{{end}}</label>
       </div>
       <div class="form-actions mt-section">
         <button class="btn btn-primary" type="submit">Save settings</button>

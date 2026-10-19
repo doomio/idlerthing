@@ -134,6 +134,32 @@ func Sync(ctx context.Context, db *sql.DB, providerID int64, key, url string, no
 	if err := (&model.PMStore{DB: db}).ReplaceTx(ctx, tx, providerID, cached); err != nil {
 		return Result{}, err
 	}
+	var autoAdd bool
+	if err := tx.QueryRowContext(ctx, "SELECT pm_auto_add FROM providers WHERE id = ?", providerID).Scan(&autoAdd); err != nil {
+		return Result{}, fmt.Errorf("read provider auto-add: %w", err)
+	}
+	if autoAdd {
+		for _, service := range cached {
+			if service.Status != "Active" || service.Domain == "" {
+				continue
+			}
+			var count int
+			if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM seedboxes WHERE provider_id = ? AND pm_service_id = ?", providerID, service.ServiceID).Scan(&count); err != nil {
+				return Result{}, err
+			}
+			if count == 0 {
+				// Do not create duplicates of a user's unlinked inventory row.
+				if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM seedboxes WHERE provider_id = ? AND hostname = ? COLLATE NOCASE", providerID, service.Domain).Scan(&count); err != nil {
+					return Result{}, err
+				}
+				if count == 0 {
+					if _, err := tx.ExecContext(ctx, "INSERT INTO seedboxes (hostname, provider_id, pm_service_id, active) VALUES (?, ?, ?, 1)", service.Domain, providerID, service.ServiceID); err != nil {
+						return Result{}, fmt.Errorf("auto-add seedbox: %w", err)
+					}
+				}
+			}
+		}
+	}
 	// A newly discovered exact-host link must be reconciled in this same
 	// transaction, not on the next manual sync.
 	candidates, err := model.UnlinkedSeedboxesTx(ctx, tx, providerID)

@@ -293,18 +293,23 @@ func isCancelledRequest(r *http.Request) bool { return r.URL.Query().Get("cancel
 // error is not actionable in a banner, and it is the only record of WHICH
 // provider failed.
 func (s *Server) handleSeedboxFleetSync(w http.ResponseWriter, r *http.Request) {
-	providers, err := s.catalogs.ProvidersWithKey(r.Context())
+	kind, msg := s.syncPM(context.WithoutCancel(r.Context()))
+	s.setFlash(w, r, kind, msg)
+	http.Redirect(w, r, routeSeedboxFleet, http.StatusSeeOther)
+}
+
+// syncPM is shared by the manual action and the automatic scheduler.
+func (s *Server) syncPM(parent context.Context) (string, string) {
+	providers, err := s.catalogs.ProvidersWithKey(parent)
 	if err != nil {
-		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
-		return
+		slog.Error("list providers for sync", "err", err)
+		return "err", "Sync failed — the journal names the reason."
 	}
 
 	s.pmSyncMu.Lock()
 	if s.pmSyncing {
 		s.pmSyncMu.Unlock()
-		s.setFlash(w, r, "err", "A sync is already running.")
-		http.Redirect(w, r, routeSeedboxFleet, http.StatusSeeOther)
-		return
+		return "err", "A sync is already running."
 	}
 	s.pmSyncing = true
 	s.pmSyncMu.Unlock()
@@ -319,7 +324,7 @@ func (s *Server) handleSeedboxFleetSync(w http.ResponseWriter, r *http.Request) 
 	// when a write times out, so one slow provider could abort the whole
 	// batch mid-flight. Each stage gets its own deadline; the page redirect
 	// still follows the request's lifetime.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()),
+	ctx, cancel := context.WithTimeout(parent,
 		syncBudget(len(providers)))
 	defer cancel()
 
@@ -379,8 +384,8 @@ func (s *Server) handleSeedboxFleetSync(w http.ResponseWriter, r *http.Request) 
 		kind = "err"
 		msg += " At least one API key was rejected — re-enter it under Catalogs → Providers."
 	}
-	s.setFlash(w, r, kind, msg)
-	http.Redirect(w, r, routeSeedboxFleet, http.StatusSeeOther)
+	slog.Info("PulsedMedia sync", "services", feed, "reconciled", reconciled, "failed", failed)
+	return kind, msg
 }
 
 // syncBudget sizes the whole-batch deadline: Fetch allows 30s per provider,

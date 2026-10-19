@@ -157,7 +157,7 @@ type PMLink struct {
 func LinkedSeedboxesTx(ctx context.Context, tx *sql.Tx, providerID int64) ([]PMLink, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, pm_service_id, disk_as_mb FROM seedboxes
-		WHERE provider_id = ? AND pm_service_id IS NOT NULL
+		WHERE provider_id = ? AND pm_service_id IS NOT NULL AND pm_manual_override = 0
 		ORDER BY id`, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("list linked seedboxes: %w", err)

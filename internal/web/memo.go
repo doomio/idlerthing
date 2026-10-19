@@ -31,16 +31,17 @@ type reqMemo struct {
 
 // settingsRow is the singleton settings row in struct form.
 type settingsRow struct {
-	DefaultCurrency   string
-	DashboardCurrency string
-	DueSoon           int
-	RecentlyAdded     int
-	Theme             string
-	ServersPublic     bool
-	AccentColor       string
-	Compact           bool
-	PrometheusEnabled bool
-	PrometheusURL     string
+	PMSyncIntervalMinutes int
+	DefaultCurrency       string
+	DashboardCurrency     string
+	DueSoon               int
+	RecentlyAdded         int
+	Theme                 string
+	ServersPublic         bool
+	AccentColor           string
+	Compact               bool
+	PrometheusEnabled     bool
+	PrometheusURL         string
 }
 
 // memo returns the request's memo (installed by loadSession; created
@@ -65,11 +66,11 @@ func (s *Server) memoSettings(r *http.Request) *settingsRow {
 	err := s.db.QueryRowContext(r.Context(), `
 		SELECT default_currency, dashboard_currency, due_soon_amount,
 			recently_added_amount, theme, servers_public, accent_color,
-			compact_mode, prometheus_enabled, prometheus_url
+			compact_mode, prometheus_enabled, prometheus_url, pm_sync_interval_minutes
 		FROM settings WHERE id = 1`).
 		Scan(&row.DefaultCurrency, &row.DashboardCurrency, &row.DueSoon,
 			&row.RecentlyAdded, &theme, &serversPublic, &accent, &compact,
-			&promEnabled, &promURL)
+			&promEnabled, &promURL, &row.PMSyncIntervalMinutes)
 	if err == nil {
 		row.Theme = theme
 		row.ServersPublic = serversPublic != 0

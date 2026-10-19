@@ -1,0 +1,3 @@
+ALTER TABLE seedboxes ADD COLUMN pm_manual_override INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE providers ADD COLUMN pm_auto_add INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN pm_sync_interval_minutes INTEGER NOT NULL DEFAULT 360;

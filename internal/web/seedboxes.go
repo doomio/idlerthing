@@ -419,6 +419,7 @@ func parseSeedboxForm(r *http.Request) (*model.Seedbox, *model.Pricing, map[stri
 		Active:              r.FormValue("active") != "",
 		ShowPublic:          r.FormValue("show_public") != "",
 		WasPromo:            r.FormValue("was_promo") != "",
+		PMManualOverride:    r.FormValue("pm_manual_override") != "",
 		SSHPollEnabled:      r.FormValue("ssh_poll_enabled") != "",
 		SSHUser:             strings.TrimSpace(r.FormValue("ssh_user")),
 		SSHHostMetrics:      r.FormValue("ssh_host_metrics") != "",

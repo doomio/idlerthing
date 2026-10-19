@@ -32,21 +32,22 @@ import (
 
 // settingsView is the template payload for GET /settings.
 type settingsView struct {
-	DefaultCurrency   string
-	DashboardCurrency string
-	DueSoon           int
-	RecentlyAdded     int
-	Theme             string
-	ServersPublic     bool
-	AccentColor       string
-	Compact           bool
-	PrometheusEnabled bool
-	PrometheusURL     string
-	Currencies        []string
-	TokenSet          bool
-	RevealedToken     string // shown once after generation
-	Version           string // build version, shown in the About panel
-	Errors            map[string]string
+	PMSyncIntervalMinutes int
+	DefaultCurrency       string
+	DashboardCurrency     string
+	DueSoon               int
+	RecentlyAdded         int
+	Theme                 string
+	ServersPublic         bool
+	AccentColor           string
+	Compact               bool
+	PrometheusEnabled     bool
+	PrometheusURL         string
+	Currencies            []string
+	TokenSet              bool
+	RevealedToken         string // shown once after generation
+	Version               string // build version, shown in the About panel
+	Errors                map[string]string
 }
 
 // handleSettingsGet renders GET /settings.
@@ -59,6 +60,7 @@ func (s *Server) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
 // is per-request and the success path redirects).
 func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, view settingsView) {
 	row := s.memoSettings(r)
+	view.PMSyncIntervalMinutes = row.PMSyncIntervalMinutes
 	view.DefaultCurrency = row.DefaultCurrency
 	view.DashboardCurrency = row.DashboardCurrency
 	view.DueSoon = row.DueSoon
@@ -104,6 +106,13 @@ func (s *Server) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 	if err != nil || recent < 1 || recent > 100 {
 		errs["recently_added_amount"] = "Must be between 1 and 100."
 	}
+	interval, err := strconv.Atoi(r.FormValue("pm_sync_interval_minutes"))
+	if r.FormValue("pm_sync_interval_minutes") == "" {
+		interval = s.memoSettings(r).PMSyncIntervalMinutes
+	}
+	if interval < 15 || interval > 10080 {
+		errs["pm_sync_interval_minutes"] = "Must be between 15 and 10080 minutes."
+	}
 	serversPublic := r.FormValue("servers_public") != ""
 	compact := r.FormValue("compact_mode") != ""
 	promEnabled := r.FormValue("prometheus_enabled") != ""
@@ -133,11 +142,11 @@ func (s *Server) handleSettingsUpdate(w http.ResponseWriter, r *http.Request) {
 		UPDATE settings SET default_currency = ?, dashboard_currency = ?,
 			due_soon_amount = ?, recently_added_amount = ?, theme = ?,
 			servers_public = ?, accent_color = ?, compact_mode = ?,
-			prometheus_enabled = ?, prometheus_url = ?,
+			prometheus_enabled = ?, prometheus_url = ?, pm_sync_interval_minutes = ?,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = 1`,
 		defaultCur, dashCur, dueSoon, recent, theme, boolToIntWeb(serversPublic),
-		accent, boolToIntWeb(compact), boolToIntWeb(promEnabled), promURL); err != nil {
+		accent, boolToIntWeb(compact), boolToIntWeb(promEnabled), promURL, interval); err != nil {
 		http.Error(w, errMsgServerErr, http.StatusInternalServerError)
 		return
 	}

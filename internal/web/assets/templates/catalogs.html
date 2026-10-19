@@ -72,6 +72,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
           {{if index $v.HasKey .ID}}
           <label class="field-hint"><input type="checkbox" name="clear_key" value="on"> clear</label>
           {{end}}
+          <label class="field-hint"><input type="checkbox" name="pm_auto_add" value="on" {{if index $v.AutoAdd .ID}}checked{{end}}> auto-add seedboxes</label>
           <button class="icon-btn" type="submit" aria-label="Save the PulsedMedia API key for {{.Name}}" title="Save key">✓</button>
         </form>
       </td>

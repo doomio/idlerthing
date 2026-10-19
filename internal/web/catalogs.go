@@ -39,6 +39,7 @@ type catalogView struct {
 	// itself is never read into the view, so it cannot reach the template.
 	ShowKeys bool
 	HasKey   map[int64]bool
+	AutoAdd  map[int64]bool
 }
 
 // newCatalogView builds the list payload, including the per-row hints that
@@ -57,6 +58,17 @@ func (s *Server) newCatalogView(r *http.Request, kindStr string, kind model.Cata
 	if kindStr == "providers" {
 		view.ShowKeys = true
 		view.HasKey = map[int64]bool{}
+		view.AutoAdd = map[int64]bool{}
+		rows, err := s.db.QueryContext(r.Context(), "SELECT id FROM providers WHERE pm_auto_add = 1")
+		if err == nil {
+			for rows.Next() {
+				var id int64
+				if rows.Scan(&id) == nil {
+					view.AutoAdd[id] = true
+				}
+			}
+			rows.Close()
+		}
 		providers, err := (&model.CatalogStore{DB: s.db}).ProvidersWithKey(r.Context())
 		if err == nil {
 			for _, p := range providers {
@@ -206,6 +218,12 @@ func (s *Server) handleProviderKey(w http.ResponseWriter, r *http.Request) {
 		errMsg = "That entry no longer exists — it may have been deleted."
 	default:
 		errMsg = "Save failed."
+	}
+	if errMsg == "" {
+		_, err = s.db.ExecContext(r.Context(), "UPDATE providers SET pm_auto_add = ? WHERE id = ?", boolToIntWeb(r.FormValue("pm_auto_add") != ""), id)
+		if err != nil {
+			errMsg = "Save failed."
+		}
 	}
 	s.respondCatalogMutation(w, r, kindStr, kind, errMsg)
 }
