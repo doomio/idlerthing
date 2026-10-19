@@ -19,6 +19,7 @@ package web
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -27,9 +28,11 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -51,6 +54,116 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 	n, err := w.writer.Write(p)
 	w.remaining -= n
 	return n, err
+}
+
+func sshAccountCommand(b *model.Seedbox) string {
+	if !b.SSHQuotaMetrics && !b.SSHTrafficMetrics {
+		return ""
+	}
+	var parts []string
+	if b.SSHQuotaMetrics {
+		parts = append(parts, `if command -v quota >/dev/null 2>&1; then q=$(quota -v -w 2>/dev/null | tail -n 1 | head -c 320); if [ -n "$q" ]; then printf 'quota=%s\n' "$q"; fi; fi; if [ -f "$HOME/.quota" ]; then printf 'quota_file='; head -c 320 "$HOME/.quota"; printf '\n'; fi`)
+	}
+	if b.SSHTrafficMetrics {
+		parts = append(parts, `for k in traffic_limit bonus_traffic; do case "$k" in traffic_limit) f="$HOME/.trafficLimit";; *) f="$HOME/.bonusTraffic";; esac; if [ -f "$f" ]; then printf '%s=' "$k"; head -c 32 "$f"; printf '\n'; fi; done; if [ -e "$HOME/.throttle" ]; then echo throttled=1; else echo throttled=0; fi`)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func parseAccountQuotaUsed(token string) (int64, error) {
+	multiplier := float64(1024)
+	if len(token) > 0 {
+		switch token[len(token)-1] {
+		case 'K':
+			multiplier = 1024
+			token = token[:len(token)-1]
+		case 'M':
+			multiplier = 1024 * 1024
+			token = token[:len(token)-1]
+		case 'G':
+			multiplier = 1024 * 1024 * 1024
+			token = token[:len(token)-1]
+		case 'T':
+			multiplier = 1024 * 1024 * 1024 * 1024
+			token = token[:len(token)-1]
+		}
+	}
+	v, err := strconv.ParseFloat(token, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v*multiplier > 1<<60 {
+		return 0, errors.New("invalid quota")
+	}
+	return int64(v * multiplier), nil
+}
+
+func accountQuotaSummary(raw string) (string, error) {
+	fields := strings.Fields(raw)
+	if len(fields) < 7 {
+		return "", errors.New("invalid account quota")
+	}
+	usedBytes, err := parseAccountQuotaUsed(fields[1])
+	if err != nil {
+		return "", err
+	}
+	softBytes, err := parseAccountQuotaUsed(fields[2])
+	if err != nil {
+		return "", err
+	}
+	if softBytes == 0 {
+		return "Account disk used: " + strconv.FormatInt(usedBytes/(1024*1024), 10) + " MiB (quota not set)", nil
+	}
+	return "Account disk used / soft quota: " + strconv.FormatInt(usedBytes/(1024*1024), 10) + " / " + strconv.FormatInt(softBytes/(1024*1024), 10) + " MiB", nil
+}
+
+func parseSSHAccountSnapshot(raw string, b *model.Seedbox) (string, error) {
+	if len(raw) == 0 || len(raw) > 1024 {
+		return "", errors.New("invalid account snapshot")
+	}
+	values := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSuffix(raw, "\n"), "\n") {
+		key, val, ok := strings.Cut(line, "=")
+		if !ok || key == "" || strings.ContainsAny(val, "\r\n=") || len(val) > 160 {
+			return "", errors.New("invalid account snapshot")
+		}
+		values[key] = strings.TrimSpace(val)
+	}
+	var results []string
+	if b.SSHQuotaMetrics {
+		quota := "Account disk quota unavailable"
+		for _, key := range []string{"quota", "quota_file"} {
+			if values[key] == "" {
+				continue
+			}
+			if summary, err := accountQuotaSummary(values[key]); err == nil {
+				quota = summary
+				break
+			}
+		}
+		results = append(results, quota)
+	}
+	if b.SSHTrafficMetrics {
+		if values["traffic_limit"] == "" {
+			results = append(results, "Traffic limit unavailable")
+		} else {
+			limit, err := strconv.ParseFloat(values["traffic_limit"], 64)
+			if err != nil || math.IsNaN(limit) || math.IsInf(limit, 0) || limit < 0 || limit > 1e9 {
+				results = append(results, "Traffic limit unavailable")
+			} else {
+				bonus := 0.0
+				if values["bonus_traffic"] != "" {
+					bonus, err = strconv.ParseFloat(values["bonus_traffic"], 64)
+					if err != nil || math.IsNaN(bonus) || math.IsInf(bonus, 0) || bonus < 0 || bonus > 1e9 {
+						bonus = 0
+					}
+				}
+				throttle := values["throttled"]
+				if throttle != "0" && throttle != "1" {
+					throttle = "unknown"
+				}
+				results = append(results, "Traffic limit: "+strconv.FormatFloat(limit+min(bonus, limit), 'f', -1, 64)+" GiB; throttled: "+throttle)
+			}
+		}
+	}
+	return strings.Join(results, "; "), nil
 }
 
 func sshDirectoryCommand(b *model.Seedbox) string {
@@ -82,6 +195,50 @@ func parseSSHDirectoryUsage(raw string) (int, int64, error) {
 		total += size
 	}
 	return count, total, nil
+}
+
+type directoryEntry struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
+// ponytail: O(entries*500); replace with a heap only if large home listings become slow.
+func parseSSHDirectoryBreakdown(raw string) ([]directoryEntry, int, int64, error) {
+	if len(raw) == 0 || len(raw) > 1<<20 || raw[len(raw)-1] != 0 {
+		return nil, 0, 0, errors.New("invalid directory snapshot")
+	}
+	if raw == "\x00" {
+		return nil, 0, 0, nil
+	}
+	var top []directoryEntry
+	var restCount int
+	var restSize int64
+	for _, line := range strings.Split(strings.TrimSuffix(raw, "\x00"), "\x00") {
+		value, name, ok := strings.Cut(line, "\t")
+		if !ok || !strings.HasPrefix(name, "./") || len(name) <= 2 || strings.ContainsAny(name[2:], "/\x00") || !utf8.ValidString(name) {
+			return nil, 0, 0, errors.New("invalid directory entry")
+		}
+		size, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || size < 0 || size > 1<<60 || restSize > 1<<60-size {
+			return nil, 0, 0, errors.New("invalid directory size")
+		}
+		entry := directoryEntry{Name: name[2:], Size: size}
+		idx := sort.Search(len(top), func(i int) bool { return top[i].Size < size || top[i].Size == size && top[i].Name > entry.Name })
+		if idx >= 500 {
+			restCount++
+			restSize += size
+			continue
+		}
+		top = append(top, directoryEntry{})
+		copy(top[idx+1:], top[idx:])
+		top[idx] = entry
+		if len(top) > 500 {
+			restCount++
+			restSize += top[500].Size
+			top = top[:500]
+		}
+	}
+	return top, restCount, restSize, nil
 }
 
 func dialPublicSSH(ctx context.Context, network, address string) (net.Conn, error) {
@@ -280,11 +437,54 @@ func runSSHCommand(ctx context.Context, b *model.Seedbox, command string, timeou
 	return out.String(), nil
 }
 
-func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
-	return collectSSHMetrics(ctx, b, runSSHCommand)
+type sshPollResult struct {
+	Summary     string
+	Directory   []directoryEntry
+	RestCount   int
+	RestSize    int64
+	DirectoryOK bool
+}
+
+func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (sshPollResult, error) {
+	return collectSSHMetricsResult(ctx, b, runSSHCommand)
+}
+
+func sshDockerCommand(b *model.Seedbox) string {
+	if !b.SSHDockerMetrics {
+		return ""
+	}
+	return `uid=$(id -u); socket="/run/user/$uid/docker.sock"; [ -S "$socket" ] && [ "$(stat -c %u "$socket")" = "$uid" ] || exit 1; curl -q --silent --show-error --fail --max-time 8 --noproxy '*' --unix-socket "$socket" 'http://localhost/v1.41/containers/json?all=1'`
+}
+
+func parseDockerSnapshot(raw string) (string, error) {
+	if len(raw) > 16384 {
+		return "", errors.New("Docker snapshot too large")
+	}
+	var containers []struct{ State string }
+	dec := json.NewDecoder(strings.NewReader(raw))
+	if err := dec.Decode(&containers); err != nil || containers == nil || dec.Decode(new(any)) != io.EOF {
+		return "", errors.New("invalid Docker snapshot")
+	}
+	running := 0
+	for _, c := range containers {
+		switch c.State {
+		case "running":
+			running++
+		case "created", "restarting", "removing", "paused", "exited", "dead":
+		default:
+			return "", errors.New("invalid Docker container state")
+		}
+	}
+	return "Docker containers: " + strconv.Itoa(len(containers)) + " (" + strconv.Itoa(running) + " running)", nil
 }
 
 func collectSSHMetrics(ctx context.Context, b *model.Seedbox, run func(context.Context, *model.Seedbox, string, time.Duration, int) (string, error)) (string, error) {
+	result, err := collectSSHMetricsResult(ctx, b, run)
+	return result.Summary, err
+}
+
+func collectSSHMetricsResult(ctx context.Context, b *model.Seedbox, run func(context.Context, *model.Seedbox, string, time.Duration, int) (string, error)) (sshPollResult, error) {
+	var poll sshPollResult
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	var results []string
@@ -308,14 +508,40 @@ func collectSSHMetrics(ctx context.Context, b *model.Seedbox, run func(context.C
 			failures++
 		}
 	}
-	if b.SSHDirectoryMetrics {
-		out, err := run(ctx, b, sshDirectoryCommand(b), 2*time.Minute, 8192)
+	if b.SSHQuotaMetrics || b.SSHTrafficMetrics {
+		out, err := run(ctx, b, sshAccountCommand(b), sshPollTimeout, 1024)
 		if err == nil {
-			var count int
-			var size int64
-			count, size, err = parseSSHDirectoryUsage(out)
+			var summary string
+			summary, err = parseSSHAccountSnapshot(out, b)
 			if err == nil {
-				results = append(results, "Top-level home entries: "+strconv.Itoa(count)+" ("+fmtMB(size/(1024*1024))+" total)")
+				results = append(results, summary)
+			}
+		}
+		if err != nil {
+			results = append(results, "Account metrics unavailable")
+			failures++
+		}
+	}
+	if b.SSHDirectoryMetrics {
+		out, err := run(ctx, b, sshDirectoryCommand(b), 2*time.Minute, 1<<20)
+		if err == nil {
+			var entries []directoryEntry
+			var restCount int
+			var restSize int64
+			entries, restCount, restSize, err = parseSSHDirectoryBreakdown(out)
+			if err == nil {
+				var total int64 = restSize
+				for _, entry := range entries {
+					if total > 1<<60-entry.Size {
+						err = errors.New("invalid directory total")
+						break
+					}
+					total += entry.Size
+				}
+				if err == nil {
+					poll.Directory, poll.RestCount, poll.RestSize, poll.DirectoryOK = entries, restCount, restSize, true
+					results = append(results, "Top-level home entries: "+strconv.Itoa(len(entries)+restCount)+" ("+fmtMB(total/(1024*1024))+" total)")
+				}
 			}
 		}
 		if err != nil {
@@ -323,13 +549,29 @@ func collectSSHMetrics(ctx context.Context, b *model.Seedbox, run func(context.C
 			failures++
 		}
 	}
+	if b.SSHDockerMetrics {
+		// Only the authenticated account's rootless socket; fixed GET, no forwarding.
+		out, err := run(ctx, b, sshDockerCommand(b), sshPollTimeout, 16384)
+		if err == nil {
+			var summary string
+			summary, err = parseDockerSnapshot(out)
+			if err == nil {
+				results = append(results, summary)
+			}
+		}
+		if err != nil {
+			results = append(results, "Docker observation unavailable")
+			failures++
+		}
+	}
 	if len(results) == 0 {
-		return "", errors.New("no SSH metrics selected")
+		return poll, errors.New("no SSH metrics selected")
 	}
 	if failures == len(results) {
-		return "", errors.New("SSH observations unavailable")
+		return poll, errors.New("SSH observations unavailable")
 	}
-	return strings.Join(results, "; "), nil
+	poll.Summary = strings.Join(results, "; ")
+	return poll, nil
 }
 
 func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
@@ -351,7 +593,7 @@ func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "SSH polling disabled", http.StatusForbidden)
 		return
 	}
-	if !b.SSHHostMetrics && !b.SSHMemoryMetrics && !b.SSHDirectoryMetrics {
+	if !b.SSHHostMetrics && !b.SSHMemoryMetrics && !b.SSHDirectoryMetrics && !b.SSHQuotaMetrics && !b.SSHTrafficMetrics && !b.SSHDockerMetrics {
 		http.Error(w, "No SSH metrics selected", http.StatusForbidden)
 		return
 	}
@@ -364,11 +606,22 @@ func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
 		}
 		s.setFlash(w, r, "err", "SSH poll failed at "+stamp+"; check SSH access, known_hosts and selected metric availability.")
 	} else {
-		if _, saveErr := s.db.ExecContext(r.Context(), `INSERT INTO ssh_observations (seedbox_id, result, success_at, attempted_at) VALUES (?, ?, ?, ?) ON CONFLICT(seedbox_id) DO UPDATE SET result = excluded.result, success_at = excluded.success_at, attempted_at = excluded.attempted_at, last_error = ''`, id, result, stamp, stamp); saveErr != nil {
+		if _, saveErr := s.db.ExecContext(r.Context(), `INSERT INTO ssh_observations (seedbox_id, result, success_at, attempted_at) VALUES (?, ?, ?, ?) ON CONFLICT(seedbox_id) DO UPDATE SET result = excluded.result, success_at = excluded.success_at, attempted_at = excluded.attempted_at, last_error = ''`, id, result.Summary, stamp, stamp); saveErr != nil {
 			http.Error(w, errMsgServerErr, http.StatusInternalServerError)
 			return
 		}
-		s.setFlash(w, r, "ok", stamp+": "+result)
+		if result.DirectoryOK {
+			data, marshalErr := json.Marshal(result.Directory)
+			if marshalErr != nil {
+				http.Error(w, errMsgServerErr, http.StatusInternalServerError)
+				return
+			}
+			if _, saveErr := s.db.ExecContext(r.Context(), `UPDATE ssh_observations SET directory_entries = ?, directory_rest_count = ?, directory_rest_size = ?, directory_at = ? WHERE seedbox_id = ?`, string(data), result.RestCount, result.RestSize, stamp, id); saveErr != nil {
+				http.Error(w, errMsgServerErr, http.StatusInternalServerError)
+				return
+			}
+		}
+		s.setFlash(w, r, "ok", stamp+": "+result.Summary)
 	}
 	http.Redirect(w, r, "/seedboxes/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }

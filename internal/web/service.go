@@ -265,6 +265,7 @@ type detailView struct {
 	Cards         []infoCard
 	Extras        *extrasView
 	PollURL       string
+	QBTPollURL    string
 }
 
 // ---------- Shared pricing/detail helpers ----------

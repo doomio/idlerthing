@@ -30,6 +30,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <button class="btn" type="submit">Poll SSH metrics</button>
     </form>{{end}}
+    {{if $v.QBTPollURL}}<form method="post" action="{{$v.QBTPollURL}}">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <button class="btn" type="submit">Observe qBittorrent</button>
+    </form>{{end}}
     <a class="btn" href="{{$v.EditURL}}">✎ Edit</a>
     <form method="post" action="/js-required" hx-post="{{$v.DeleteURL}}" hx-confirm="{{$v.DeleteConfirm}}">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">

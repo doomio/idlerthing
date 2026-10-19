@@ -18,6 +18,7 @@ package web
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -134,9 +135,13 @@ func (s *Server) seedboxSection() *section {
 				title = b.Title.String
 			}
 			sid := strconv.FormatInt(b.ID, 10)
+			qbtPollURL := ""
 			pollURL := ""
-			if b.SSHPollEnabled && b.Active && (b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics) {
+			if b.SSHPollEnabled && b.Active && (b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics || b.SSHQuotaMetrics || b.SSHTrafficMetrics || b.SSHDockerMetrics) {
 				pollURL = routeSeedboxes + "/" + sid + "/poll"
+			}
+			if b.QBTEnabled && b.SSHPollEnabled && b.Active {
+				qbtPollURL = routeSeedboxes + "/" + sid + "/poll-qbt"
 			}
 			sshStatus := "Off"
 			if b.SSHPollEnabled {
@@ -144,8 +149,10 @@ func (s *Server) seedboxSection() *section {
 			}
 			observation := infoCard{Title: "SSH observations", Pairs: []kvPair{{K: "Status", V: sshStatus}}}
 			if b.SSHPollEnabled {
-				var result, successAt, attemptedAt, lastError string
-				err := s.db.QueryRowContext(r.Context(), `SELECT result, success_at, attempted_at, last_error FROM ssh_observations WHERE seedbox_id = ?`, id).Scan(&result, &successAt, &attemptedAt, &lastError)
+				var result, successAt, attemptedAt, lastError, directoryData, directoryAt string
+				var restCount int
+				var restSize int64
+				err := s.db.QueryRowContext(r.Context(), `SELECT result, success_at, attempted_at, last_error, directory_entries, directory_rest_count, directory_rest_size, directory_at FROM ssh_observations WHERE seedbox_id = ?`, id).Scan(&result, &successAt, &attemptedAt, &lastError, &directoryData, &restCount, &restSize, &directoryAt)
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return nil, err
 				}
@@ -158,6 +165,38 @@ func (s *Server) seedboxSection() *section {
 				if lastError != "" {
 					observation.Pairs = append(observation.Pairs, kvPair{K: "Last error", V: lastError})
 				}
+				if b.SSHDirectoryMetrics && directoryAt != "" {
+					var entries []directoryEntry
+					if err := json.Unmarshal([]byte(directoryData), &entries); err != nil {
+						return nil, err
+					}
+					observation.Pairs = append(observation.Pairs, kvPair{K: "Directory scan (UTC)", V: directoryAt})
+					for _, entry := range entries {
+						observation.Pairs = append(observation.Pairs, kvPair{K: entry.Name, V: fmtMB(entry.Size / (1024 * 1024))})
+					}
+					if restCount > 0 {
+						observation.Pairs = append(observation.Pairs, kvPair{K: "Other entries (" + strconv.Itoa(restCount) + ")", V: fmtMB(restSize / (1024 * 1024))})
+					}
+				}
+			}
+			cards := []infoCard{}
+			if b.QBTEnabled {
+				qbt := infoCard{Title: "qBittorrent observation", Pairs: []kvPair{{K: "Status", V: "Enabled (manual)"}}}
+				var result, successAt, attemptedAt, lastError string
+				err := s.db.QueryRowContext(r.Context(), `SELECT result, success_at, attempted_at, last_error FROM qbt_observations WHERE seedbox_id = ?`, id).Scan(&result, &successAt, &attemptedAt, &lastError)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return nil, err
+				}
+				if successAt != "" {
+					qbt.Pairs = append(qbt.Pairs, kvPair{K: "Last successful poll (UTC)", V: successAt}, kvPair{K: "Last result", V: result})
+				}
+				if attemptedAt != "" {
+					qbt.Pairs = append(qbt.Pairs, kvPair{K: "Last attempt (UTC)", V: attemptedAt})
+				}
+				if lastError != "" {
+					qbt.Pairs = append(qbt.Pairs, kvPair{K: "Last error", V: lastError})
+				}
+				cards = append(cards, qbt)
 			}
 			return &detailView{
 				Title:         title,
@@ -167,7 +206,8 @@ func (s *Server) seedboxSection() *section {
 				DeleteURL:     routeSeedboxes + "/" + sid + "/delete",
 				DeleteConfirm: "Delete " + b.Hostname + "?",
 				PollURL:       pollURL,
-				Cards: []infoCard{
+				QBTPollURL:    qbtPollURL,
+				Cards: append([]infoCard{
 					{Title: "Service", Pairs: []kvPair{
 						kvs("Title", b.Title),
 						{K: "Hostname", V: b.Hostname, Mono: true},
@@ -185,7 +225,7 @@ func (s *Server) seedboxSection() *section {
 					}},
 					{Title: "Pricing", Pairs: pricingPairs(pricing), Empty: "No pricing attached."},
 					observation,
-				},
+				}, cards...),
 			}, nil
 		},
 	}
@@ -384,11 +424,15 @@ func parseSeedboxForm(r *http.Request) (*model.Seedbox, *model.Pricing, map[stri
 		SSHHostMetrics:      r.FormValue("ssh_host_metrics") != "",
 		SSHMemoryMetrics:    r.FormValue("ssh_memory_metrics") != "",
 		SSHDirectoryMetrics: r.FormValue("ssh_directory_metrics") != "",
+		SSHDockerMetrics:    r.FormValue("ssh_docker_metrics") != "",
+		SSHQuotaMetrics:     r.FormValue("ssh_quota_metrics") != "",
+		SSHTrafficMetrics:   r.FormValue("ssh_traffic_metrics") != "",
+		QBTEnabled:          r.FormValue("qbt_enabled") != "",
 	}
 	if b.Hostname == "" {
 		errs["hostname"] = "Hostname is required."
 	}
-	if (b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics) && !b.SSHPollEnabled {
+	if (b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics || b.SSHQuotaMetrics || b.SSHTrafficMetrics || b.QBTEnabled || b.SSHDockerMetrics) && !b.SSHPollEnabled {
 		errs["ssh_poll_enabled"] = "Enable SSH polling before selecting metrics."
 	}
 	if b.SSHPollEnabled && b.SSHUser == "" {

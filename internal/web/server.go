@@ -79,7 +79,8 @@ type Server struct {
 	// pmapiURL overrides the PulsedMedia feed endpoint (IDLER_PMAPI_URL).
 	// Empty uses the built-in URL; tests point it at a mock server.
 	pmapiURL string
-	sshPoll  func(context.Context, *model.Seedbox) (string, error)
+	sshPoll  func(context.Context, *model.Seedbox) (sshPollResult, error)
+	qbtPoll  func(context.Context, *model.Seedbox) (string, error)
 
 	// pmSyncing serialises fleet syncs so a burst of clicks cannot launch
 	// several fetches at once (the provider rate-limits by key). Per-Server
@@ -127,6 +128,7 @@ func New(db *sql.DB) (*Server, error) {
 		secret:    secret,
 		prom:      &promCache{},
 		sshPoll:   pollSeedboxLoad,
+		qbtPoll:   pollQBT,
 	}, nil
 }
 
@@ -258,6 +260,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /seedboxes/fleet", s.protect(http.HandlerFunc(s.handleSeedboxFleet)))
 	mux.Handle("POST /seedboxes/fleet/sync", s.protect(http.HandlerFunc(s.handleSeedboxFleetSync)))
 	mux.Handle("POST /seedboxes/{id}/poll", s.protect(http.HandlerFunc(s.handleSeedboxPoll)))
+	mux.Handle("POST /seedboxes/{id}/poll-qbt", s.protect(http.HandlerFunc(s.handleQBTPoll)))
 	mux.Handle("GET /seedboxes/new", s.protect(http.HandlerFunc(s.handleSeedboxNew)))
 	mux.Handle("POST /seedboxes", s.protect(http.HandlerFunc(s.handleSeedboxCreate)))
 	mux.Handle("GET /seedboxes/{id}", s.protect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.handleSectionDetail(w, r, seedboxSec) })))
