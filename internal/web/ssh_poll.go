@@ -20,7 +20,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"io"
 	"math"
 	"net"
@@ -75,32 +74,71 @@ func dialPublicSSH(ctx context.Context, network, address string) (net.Conn, erro
 	return conn, err
 }
 
-func parseSSHHostSnapshot(raw string) (sshHostSnapshot, error) {
+func sshMetricsCommand(b *model.Seedbox) string {
+	var commands []string
+	if b.SSHHostMetrics {
+		commands = append(commands, "cat /proc/loadavg")
+	}
+	if b.SSHMemoryMetrics {
+		commands = append(commands, "grep -E '^(MemTotal|MemAvailable):' /proc/meminfo")
+	}
+	return strings.Join(commands, "; ")
+}
+
+func parseSelectedSSHMetrics(raw string, b *model.Seedbox) (sshHostSnapshot, error) {
 	if len(raw) > 256 {
 		return sshHostSnapshot{}, errors.New("invalid host snapshot")
 	}
 	lines := strings.Split(strings.TrimSpace(raw), "\n")
-	if len(lines) < 3 {
-		return sshHostSnapshot{}, errors.New("invalid host snapshot")
-	}
-	fields := strings.Fields(lines[0])
-	if len(fields) < 3 {
-		return sshHostSnapshot{}, errors.New("invalid host snapshot")
-	}
-	for _, field := range fields[:3] {
-		v, err := strconv.ParseFloat(field, 64)
-		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1e6 {
-			return sshHostSnapshot{}, errors.New("invalid host load")
+	idx := 0
+	var snap sshHostSnapshot
+	if b.SSHHostMetrics {
+		if idx >= len(lines) {
+			return snap, errors.New("missing host load")
 		}
+		fields := strings.Fields(lines[idx])
+		idx++
+		if len(fields) != 5 {
+			return snap, errors.New("invalid host load")
+		}
+		for _, field := range fields[:3] {
+			v, err := strconv.ParseFloat(field, 64)
+			if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1e6 {
+				return snap, errors.New("invalid host load")
+			}
+		}
+		snap.Load = strings.Join(fields[:3], " / ")
 	}
-	var total, available int64
-	if _, err := fmt.Sscanf(lines[1], "MemTotal: %d kB", &total); err != nil {
-		return sshHostSnapshot{}, errors.New("invalid host memory")
+	if b.SSHMemoryMetrics {
+		if len(lines)-idx < 2 {
+			return snap, errors.New("invalid host memory")
+		}
+		parseMemory := func(line, label string) (int64, error) {
+			fields := strings.Fields(line)
+			if len(fields) != 3 || fields[0] != label || fields[2] != "kB" {
+				return 0, errors.New("invalid host memory")
+			}
+			return strconv.ParseInt(fields[1], 10, 64)
+		}
+		total, err := parseMemory(lines[idx], "MemTotal:")
+		if err != nil {
+			return snap, err
+		}
+		available, err := parseMemory(lines[idx+1], "MemAvailable:")
+		if err != nil || total <= 0 || available < 0 || available > total || total > 1<<40 {
+			return snap, errors.New("invalid host memory")
+		}
+		snap.MemoryTotal, snap.MemoryUsed = total*1024, (total-available)*1024
+		idx += 2
 	}
-	if _, err := fmt.Sscanf(lines[2], "MemAvailable: %d kB", &available); err != nil || total <= 0 || available < 0 || available > total || total > 1<<40 {
-		return sshHostSnapshot{}, errors.New("invalid host memory")
+	if idx != len(lines) {
+		return snap, errors.New("unexpected SSH output")
 	}
-	return sshHostSnapshot{Load: strings.Join(fields[:3], " / "), MemoryUsed: (total - available) * 1024, MemoryTotal: total * 1024}, nil
+	return snap, nil
+}
+
+func parseSSHHostSnapshot(raw string) (sshHostSnapshot, error) {
+	return parseSelectedSSHMetrics(raw, &model.Seedbox{SSHHostMetrics: true, SSHMemoryMetrics: true})
 }
 
 type sshHostSnapshot struct {
@@ -202,10 +240,10 @@ func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
 	var out strings.Builder
 	session.Stdout = &limitedWriter{writer: &out, remaining: 256}
 	session.Stderr = io.Discard
-	if err := session.Run("cat /proc/loadavg; grep -E '^(MemTotal|MemAvailable):' /proc/meminfo"); err != nil {
+	if err := session.Run(sshMetricsCommand(b)); err != nil {
 		return "", err
 	}
-	snap, err := parseSSHHostSnapshot(out.String())
+	snap, err := parseSelectedSSHMetrics(out.String(), b)
 	if err != nil {
 		return "", err
 	}

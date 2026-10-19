@@ -57,9 +57,35 @@ func TestParseSSHHostSnapshot(t *testing.T) {
 	}
 }
 
+func TestSSHMetricSelection(t *testing.T) {
+	load := "0.14 0.10 0.05 1/100 123\n"
+	memory := "MemTotal: 4096 kB\nMemAvailable: 1024 kB\n"
+	for _, tc := range []struct {
+		name                string
+		host, mem           bool
+		output, wantCommand string
+	}{
+		{"load only", true, false, load, "cat /proc/loadavg"},
+		{"memory only", false, true, memory, "grep -E '^(MemTotal|MemAvailable):' /proc/meminfo"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			box := &model.Seedbox{SSHHostMetrics: tc.host, SSHMemoryMetrics: tc.mem}
+			if got := sshMetricsCommand(box); got != tc.wantCommand {
+				t.Fatalf("command %q, want %q", got, tc.wantCommand)
+			}
+			if _, err := parseSelectedSSHMetrics(tc.output, box); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	if _, err := parseSelectedSSHMetrics("MemTotal: 4096 kB junk\nMemAvailable: 1024 kB\n", &model.Seedbox{SSHMemoryMetrics: true}); err == nil {
+		t.Fatal("accepted malformed memory suffix")
+	}
+}
+
 func TestSSHPollExportImportRoundTrip(t *testing.T) {
 	ts, db, _ := newTestServerFull(t)
-	_, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo"}, nil)
+	_, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHHostMetrics: true, SSHMemoryMetrics: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +99,7 @@ func TestSSHPollExportImportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(body, []byte(`"ssh_poll_enabled":true`)) || !bytes.Contains(body, []byte(`"ssh_user":"demo"`)) {
+	if !bytes.Contains(body, []byte(`"ssh_poll_enabled":true`)) || !bytes.Contains(body, []byte(`"ssh_user":"demo"`)) || !bytes.Contains(body, []byte(`"ssh_host_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_memory_metrics":true`)) {
 		t.Fatal("SSH opt-in absent from export")
 	}
 	restored := freshDB(t)
@@ -81,7 +107,7 @@ func TestSSHPollExportImportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _, err := (&model.SeedboxStore{DB: restored}).Get(t.Context(), 1)
-	if err != nil || !b.SSHPollEnabled || b.SSHUser != "demo" {
+	if err != nil || !b.SSHPollEnabled || b.SSHUser != "demo" || !b.SSHHostMetrics || !b.SSHMemoryMetrics {
 		t.Fatalf("SSH opt-in lost on restore: %+v %v", b, err)
 	}
 }
