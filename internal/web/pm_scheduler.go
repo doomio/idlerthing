@@ -6,9 +6,12 @@ import (
 	"time"
 )
 
-// RunPMSync periodically refreshes keyed providers. Call once for the process lifetime.
+// RunPMSync refreshes keyed providers at startup and then periodically.
 // The interval is read after each wake, so Settings changes take effect on the next cycle.
 func (s *Server) RunPMSync(ctx context.Context, after func(time.Duration) <-chan time.Time) {
+	if ctx.Err() == nil {
+		s.syncPM(ctx)
+	}
 	for ctx.Err() == nil {
 		var minutes int
 		if err := s.db.QueryRowContext(ctx, "SELECT pm_sync_interval_minutes FROM settings WHERE id=1").Scan(&minutes); err != nil {
