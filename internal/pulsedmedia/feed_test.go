@@ -103,6 +103,18 @@ func TestAmountParsing(t *testing.T) {
 		{`""`, 0},
 		{`"abc"`, 0},
 		{`"-5.5"`, -5.5},
+		// Exponent notation must keep its exponent, bare or quoted (the
+		// character strip used to eat the 'e': 1e2 read as 12).
+		{`1e2`, 100},
+		{`"1e2"`, 100},
+		// \u escapes decode before parsing ("\u20ac" is €; raw text leaked
+		// the escape's hex digits into the amount: 2011.94).
+		{`"\u20ac11.94"`, 11.94},
+		{`"\u00a51,200"`, 1200},
+		// Absurd magnitudes clamp to 0 on every path.
+		{`2e12`, 0},
+		{`"2e12"`, 0},
+		{`1e400`, 0},
 	}
 	for _, c := range cases {
 		body := []byte(`{"services":[{"id":1,"recurring_amount":` + c.raw + `}]}`)

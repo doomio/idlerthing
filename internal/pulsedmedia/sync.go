@@ -80,6 +80,17 @@ func Sync(ctx context.Context, db *sql.DB, providerID int64, key, url string, no
 	stamp := now.Format(time.RFC3339)
 	cached := make([]model.PMService, 0, len(feed.Services))
 	for _, s := range feed.Services {
+		quota := usageField(s, func(u *Usage) int64 { return u.DiskQuotaBytes })
+		if s.Seedbox == nil || s.Seedbox.Usage == nil {
+			// A feed that dropped the usage block reports "no quota", not
+			// "quota zero". Carrying the last reported value forward keeps
+			// the merge baseline intact: a cache row of 0 would make the
+			// next real quota change look like a human edit and be ignored
+			// forever.
+			if p, ok := prevByService[s.ID]; ok && p.DiskQuotaBytes > 0 {
+				quota = p.DiskQuotaBytes
+			}
+		}
 		cached = append(cached, model.PMService{
 			ProviderID:       providerID,
 			ServiceID:        s.ID,
@@ -101,7 +112,7 @@ func Sync(ctx context.Context, db *sql.DB, providerID int64, key, url string, no
 			CPUHours:         usageField(s, func(u *Usage) int64 { return u.CPUHours }),
 			CPUSince:         usageField(s, func(u *Usage) string { return u.CPUSince }),
 			DiskUsedBytes:    usageField(s, func(u *Usage) int64 { return u.DiskUsedBytes }),
-			DiskQuotaBytes:   usageField(s, func(u *Usage) int64 { return u.DiskQuotaBytes }),
+			DiskQuotaBytes:   quota,
 			Torrents:         usageField(s, func(u *Usage) int64 { return u.Torrents }),
 			GeneratedAt:      feed.GeneratedAt,
 			SyncedAt:         stamp,

@@ -17,6 +17,7 @@
 package web
 
 import (
+	"database/sql"
 	"net/http"
 	"net/url"
 	"strings"
@@ -55,13 +56,22 @@ func TestDecomposeMB(t *testing.T) {
 		{1536, "1536", "MB"}, // 1.5 GB isn't whole → stay MB
 		{2 * 1024 * 1024, "2", "TB"},
 		{512, "512", "MB"},
-		{0, "", "MB"},
+		{0, "0", "MB"}, // a stored 0 must round-trip, not render blank→NULL
 	}
 	for _, c := range cases {
 		v, u := decomposeMB(c.mb)
 		if v != c.value || u != c.unit {
 			t.Errorf("decomposeMB(%d) = (%q, %q), want (%q, %q)", c.mb, v, u, c.value, c.unit)
 		}
+	}
+}
+
+func TestUnitValZeroRoundTrip(t *testing.T) {
+	if got := unitVal(sql.NullInt64{Int64: 0, Valid: true}); got != "0" {
+		t.Errorf("unitVal(stored 0) = %q, want %q", got, "0")
+	}
+	if got := unitVal(sql.NullInt64{}); got != "" {
+		t.Errorf("unitVal(NULL) = %q, want empty", got)
 	}
 }
 

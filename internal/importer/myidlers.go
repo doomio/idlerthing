@@ -894,11 +894,12 @@ func importMyServer(ctx context.Context, tx *sql.Tx, rec MyServer, delta *MySumm
 		assigned++
 	}
 	if rec.Pricing != nil {
+		due := nullStr(rec.Pricing.NextDueDate)
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO pricings (service_id, service_type, currency, price, term, next_due_date)
-			VALUES (?, 1, ?, ?, ?, ?)`,
+			INSERT INTO pricings (service_id, service_type, currency, price, term, next_due_date, due_day)
+			VALUES (?, 1, ?, ?, ?, ?, ?)`,
 			serverID, rec.Pricing.Currency, rec.Pricing.Price, rec.Pricing.Term,
-			nullStr(rec.Pricing.NextDueDate)); err != nil {
+			due, importDueDay(nil, due)); err != nil {
 			return err
 		}
 		delta.Pricings++

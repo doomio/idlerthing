@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"idlerthing/internal/model"
 )
@@ -138,7 +139,7 @@ func TestFleetUsagePresentation(t *testing.T) {
 
 func TestFleetTrafficPeriodUsesCachedFeed(t *testing.T) {
 	svc := model.PMService{TrackedSince: "2026-10-01", CPUSince: "2026-10-02"}
-	box := buildFleetBox("box.example.net", svc, sql.NullInt64{}, "", 0)
+	box := buildFleetBox("box.example.net", "Example Hosting", svc, sql.NullInt64{}, "", 0)
 	if box.TrackedSince != "2026-10-01" || box.CPUSince != "2026-10-02" {
 		t.Fatalf("lost accounting periods: %+v", box)
 	}
@@ -146,7 +147,7 @@ func TestFleetTrafficPeriodUsesCachedFeed(t *testing.T) {
 
 func TestFleetUsesEditedInventoryQuota(t *testing.T) {
 	svc := model.PMService{DiskUsedBytes: 2 * 1024 * 1024 * 1024, DiskQuotaBytes: 8 * 1024 * 1024 * 1024}
-	box := buildFleetBox("box.example.net", svc, sql.NullInt64{Int64: 4 * 1024, Valid: true}, "", 0)
+	box := buildFleetBox("box.example.net", "PulsedMedia", svc, sql.NullInt64{Int64: 4 * 1024, Valid: true}, "", 0)
 	if box.DiskQuotaMB != 4*1024 || box.DiskPct != 50 {
 		t.Fatalf("fleet ignored inventory quota: quota=%d pct=%d", box.DiskQuotaMB, box.DiskPct)
 	}
@@ -164,7 +165,7 @@ func TestFleetRowsKeepRawMonthlyAmount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := srv.fleetRows(httptest.NewRequest(http.MethodGet, "/seedboxes/fleet", nil), provider, services, nil)
+	rows, err := srv.fleetRows(httptest.NewRequest(http.MethodGet, "/seedboxes/fleet", nil), "PulsedMedia", provider, services, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,5 +476,63 @@ func TestFleetNavHiddenWithoutAKey(t *testing.T) {
 
 	if strings.Contains(body, `href="/seedboxes/fleet"`) {
 		t.Fatal("the fleet link should not appear for an install that cannot use it")
+	}
+}
+
+// A just-synced provider must not mark its boxes stale, and an overdue
+// feed must mark its own — the per-provider rule that keeps a fresh
+// sibling from hiding a stalled feed.
+func TestFleetStalenessIsPerProvider(t *testing.T) {
+	fresh := buildFleetBox("fresh.example.net", "Alpha", model.PMService{
+		Status: "Active", SyncedAt: time.Now().UTC().Format(time.RFC3339),
+	}, sql.NullInt64{}, "", 0)
+	if fresh.Stale || fresh.Provider != "Alpha" {
+		t.Fatalf("a just-synced box must not read stale: %+v", fresh)
+	}
+	stale := buildFleetBox("old.example.net", "Bravo", model.PMService{
+		Status: "Active", SyncedAt: time.Now().Add(-7 * time.Hour).UTC().Format(time.RFC3339),
+	}, sql.NullInt64{}, "", 0)
+	if !stale.Stale {
+		t.Fatal("a box older than fleetStaleAfter must read stale")
+	}
+}
+
+// The header badge means "at least one provider's feed is old" and each
+// stale card names the provider whose feed stalled; a fresh feed renders
+// no badge at all.
+func TestFleetPageMarksStaleFeeds(t *testing.T) {
+	ts, database := newTestServer(t)
+	fleetFixture(t, database)
+	client := authedClient(t, ts)
+
+	old := time.Now().Add(-7 * time.Hour).UTC().Format(time.RFC3339)
+	if _, err := database.Exec("UPDATE pm_services SET synced_at = ?", old); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Get(ts.URL + "/seedboxes/fleet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readBody(t, resp)
+	resp.Body.Close()
+	if !strings.Contains(body, "at least one provider's feed is older than 6h") {
+		t.Error("header badge missing while the only feed is stale")
+	}
+	if !strings.Contains(body, "Example Host's cached data is older than 6h") {
+		t.Error("card badge must name the provider whose feed went stale")
+	}
+
+	fresh := time.Now().UTC().Format(time.RFC3339)
+	if _, err := database.Exec("UPDATE pm_services SET synced_at = ?", fresh); err != nil {
+		t.Fatal(err)
+	}
+	resp, err = client.Get(ts.URL + "/seedboxes/fleet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = readBody(t, resp)
+	resp.Body.Close()
+	if strings.Contains(body, "is older than 6h") {
+		t.Error("a fresh feed must not render any stale badge")
 	}
 }

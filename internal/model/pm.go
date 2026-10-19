@@ -215,6 +215,26 @@ func LinkSeedboxTx(ctx context.Context, tx *sql.Tx, seedboxID, serviceID int64) 
 	return nil
 }
 
+// BumpFeedDueBaselineTx records an auto-advanced due date as the last value
+// WE wrote into a linked seedbox's feed cache row. pulsedmedia.Sync tells its
+// own writes apart from human edits by comparing the inventory against that
+// cached value; without this write-back the dashboard's lazy rollover would
+// look like a human edit on the next sync and freeze the provider's
+// due-date updates forever. Only advances a baseline matching oldDue, so a
+// human-edited due date stays distinct. A no-op without a complete feed link.
+func BumpFeedDueBaselineTx(ctx context.Context, tx *sql.Tx, seedboxID int64, oldDue, nextDue string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE pm_services SET next_due = ?
+		WHERE next_due = ? AND (provider_id, service_id) IN (
+			SELECT provider_id, pm_service_id FROM seedboxes
+			WHERE id = ? AND pm_service_id IS NOT NULL AND provider_id IS NOT NULL)`,
+		nextDue, oldDue, seedboxID)
+	if err != nil {
+		return fmt.Errorf("bump feed due baseline: %w", err)
+	}
+	return nil
+}
+
 // SetSeedboxDiskTx writes only the disk size of a seedbox. It is a narrow
 // write on purpose: a sync must not touch the rest of a user's seedbox row.
 func SetSeedboxDiskTx(ctx context.Context, tx *sql.Tx, seedboxID, diskMB int64) error {

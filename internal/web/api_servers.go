@@ -95,6 +95,8 @@ func (j *serverJSON) serverFields(errs map[string]string) *model.Server {
 	}
 	if srv.Hostname == "" {
 		errs["hostname"] = "hostname is required"
+	} else if len(srv.Hostname) > maxHostnameBytes {
+		errs["hostname"] = "too long"
 	}
 	if srv.ServerType < model.TypeKVM || srv.ServerType > model.TypeNAT {
 		srv.ServerType = model.TypeKVM
@@ -103,6 +105,18 @@ func (j *serverJSON) serverFields(errs map[string]string) *model.Server {
 	srv.NetworkType = nullStrIf(j.NetworkType)
 	srv.Ns1 = nullStrIf(j.Ns1)
 	srv.Ns2 = nullStrIf(j.Ns2)
+	for _, f := range []struct {
+		name, v string
+	}{
+		{"cpu_model", srv.CPUModel.String},
+		{"network_type", srv.NetworkType.String},
+		{"ns1", srv.Ns1.String},
+		{"ns2", srv.Ns2.String},
+	} {
+		if len(f.v) > maxTextBytes {
+			errs[f.name] = "too long"
+		}
+	}
 	srv.OwnedSince = jsonDate(errs, "owned_since", j.OwnedSince)
 	return srv
 }

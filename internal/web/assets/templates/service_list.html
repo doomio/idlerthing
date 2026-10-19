@@ -41,17 +41,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 <div class="list-controls">
   <div class="tabs">
-    <a class="pill{{if eq $v.Status "active"}} active{{end}}" href="{{$v.StatusLink "active"}}"
-       hx-get="{{$v.StatusLink "active"}}" hx-target="#list-table-wrap" hx-swap="innerHTML" hx-push-url="true">Active ({{$v.ActiveCount}})</a>
-    <a class="pill{{if eq $v.Status "inactive"}} active{{end}}" href="{{$v.StatusLink "inactive"}}"
-       hx-get="{{$v.StatusLink "inactive"}}" hx-target="#list-table-wrap" hx-swap="innerHTML" hx-push-url="true">Inactive ({{$v.InactiveCount}})</a>
-    <a class="pill{{if eq $v.Status "all"}} active{{end}}" href="{{$v.StatusLink "all"}}"
-       hx-get="{{$v.StatusLink "all"}}" hx-target="#list-table-wrap" hx-swap="innerHTML" hx-push-url="true">All</a>
+    {{/* Tabs navigate fully: an htmx swap would replace only the table,
+         leaving the active-pill highlight and the search box below it
+         pointing at the old status. */}}
+    <a class="pill{{if eq $v.Status "active"}} active{{end}}" href="{{$v.StatusLink "active"}}">Active ({{$v.ActiveCount}})</a>
+    <a class="pill{{if eq $v.Status "inactive"}} active{{end}}" href="{{$v.StatusLink "inactive"}}">Inactive ({{$v.InactiveCount}})</a>
+    <a class="pill{{if eq $v.Status "all"}} active{{end}}" href="{{$v.StatusLink "all"}}">All</a>
   </div>
-  <input type="search" name="q" value="{{$v.Q}}" aria-label="Search" placeholder="{{$v.SearchHint}}"
-         class="search-input"
-         hx-get="{{$v.Base}}?status={{$v.Status}}&sort={{$v.Sort}}&dir={{$v.Dir}}"
-         hx-trigger="keyup changed delay:300ms" hx-target="#list-table-wrap" hx-swap="innerHTML" hx-push-url="true">
+  {{/* The GET form is both the no-JS path and htmx's parameter source:
+       status rides in the hidden field, q in this input, and sort/dir
+       resolve server-side from the saved pref — so a table swap can
+       never leave a stale parameter baked into the toolbar. */}}
+  <form class="search-form" method="get" action="{{$v.Base}}">
+    <input type="hidden" name="status" value="{{$v.Status}}">
+    <input type="search" name="q" value="{{$v.Q}}" aria-label="Search" placeholder="{{$v.SearchHint}}"
+           class="search-input"
+           hx-get="{{$v.Base}}"
+           hx-trigger="keyup changed delay:300ms" hx-target="#list-table-wrap" hx-swap="innerHTML" hx-push-url="true">
+  </form>
 </div>
 
 <div id="list-table-wrap">

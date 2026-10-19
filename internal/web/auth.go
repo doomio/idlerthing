@@ -120,7 +120,12 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email := strings.TrimSpace(r.FormValue("email"))
+	// Lowercased: "Admin@localhost" and "ADMIN@localhost" are the same
+	// account, and cycling case must not mint fresh per-account limiter
+	// buckets during a credential-stuffing run. All stored emails are
+	// lowercase (fixed seed; no path edits them), so the lookup is
+	// unaffected.
+	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
 	password := r.FormValue("password")
 	// Bounded inputs before they become limiter keys or bcrypt work.
 	if len(email) > 254 || len(password) > 256 {

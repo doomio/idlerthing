@@ -82,6 +82,15 @@ func (s *Server) memoSettings(r *http.Request) *settingsRow {
 	return row
 }
 
+// defaultCurrency is the pre-fill for the currency select on forms without
+// a stored pricing: the configured default, never a hardcoded USD.
+func (s *Server) defaultCurrency(r *http.Request) string {
+	if c := validCurrency(s.memoSettings(r).DefaultCurrency); c != "" {
+		return c
+	}
+	return "USD"
+}
+
 // memoPref loads ALL of the user's prefs at most once per request.
 func (s *Server) memoPref(r *http.Request, key string) (string, bool) {
 	m := memo(r)

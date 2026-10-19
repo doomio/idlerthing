@@ -27,8 +27,12 @@ import (
 // AdvanceDueDates lazily rolls past-due recurring pricings forward: any
 // active pricing whose next_due_date is before today (and whose term is not
 // one-time) is advanced by its term until it lands on or after today. Month
-// arithmetic is clamped (Jan 31 + 1 month → Feb 28/29), matching PHP's
-// addMonthsNoOverflow. Returns the number of rows updated.
+// arithmetic aims at the row's stored day-of-month anchor (due_day) and is
+// clamped to short months, so a February rollover of a Jan-31 billing does
+// not re-anchor March to the 28th. When the advanced row is a seedbox linked
+// to a provider feed whose cached baseline matches the old due date, the new
+// date becomes that baseline. This keeps provider corrections working while
+// preserving human edits. Returns the number of rows updated.
 func AdvanceDueDates(ctx context.Context, db *sql.DB) (int, error) {
 	today := time.Now().Format(time.DateOnly)
 
@@ -42,21 +46,25 @@ func AdvanceDueDates(ctx context.Context, db *sql.DB) (int, error) {
 	defer tx.Rollback()
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, term, next_due_date FROM pricings
+		SELECT id, term, next_due_date, due_day, service_type, service_id
+		FROM pricings
 		WHERE active = 1 AND next_due_date IS NOT NULL AND next_due_date < ?
 		  AND term != ?`, today, model.TermOneTime)
 	if err != nil {
 		return 0, err
 	}
 	type dueRow struct {
-		id   int64
-		term int
-		due  string
+		id          int64
+		term        int
+		due         string
+		dueDay      sql.NullInt64
+		serviceType int
+		serviceID   int64
 	}
 	var pending []dueRow
 	for rows.Next() {
 		var dr dueRow
-		if err := rows.Scan(&dr.id, &dr.term, &dr.due); err != nil {
+		if err := rows.Scan(&dr.id, &dr.term, &dr.due, &dr.dueDay, &dr.serviceType, &dr.serviceID); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -81,15 +89,27 @@ func AdvanceDueDates(ctx context.Context, db *sql.DB) (int, error) {
 		if months == 0 {
 			continue
 		}
-		due = catchUp(due, months, todayStart)
+		anchor := 0
+		if dr.dueDay.Valid {
+			anchor = int(dr.dueDay.Int64)
+		}
+		due = catchUp(due, months, todayStart, anchor)
+		next := due.Format(time.DateOnly)
+		// The rollover deliberately leaves due_day untouched: it is the
+		// anchor, not an output.
 		res, err := tx.ExecContext(ctx,
 			"UPDATE pricings SET next_due_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND next_due_date = ?",
-			due.Format(time.DateOnly), dr.id, dr.due)
+			next, dr.id, dr.due)
 		if err != nil {
 			return updated, err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
 			continue // changed concurrently — leave it alone
+		}
+		if dr.serviceType == model.ServiceSeedbox {
+			if err := model.BumpFeedDueBaselineTx(ctx, tx, dr.serviceID, dr.due, next); err != nil {
+				return updated, err
+			}
 		}
 		updated++
 	}
@@ -97,13 +117,14 @@ func AdvanceDueDates(ctx context.Context, db *sql.DB) (int, error) {
 }
 
 // catchUp advances due by whole terms until it is on or after today. Each
-// step is k*months from the ORIGINAL date, never from the previously
-// clamped one: stepping Jan 31 → Feb 28 → Mar 28 would otherwise lose the
-// month-end anchor for good after one short month.
-func catchUp(due time.Time, months int, today time.Time) time.Time {
+// step lands in the k-th target month aiming at anchorDay (the date's own
+// day when no anchor is known), computed from the ORIGINAL month so one
+// short month cannot re-anchor the whole series: with anchor 31, Jan 31 →
+// Feb 28 → Mar 31, never Mar 28.
+func catchUp(due time.Time, months int, today time.Time, anchorDay int) time.Time {
 	next := due
 	for k := 1; next.Before(today); k++ {
-		next = AddMonthsClamped(due, k*months)
+		next = addMonthsAnchored(due, k*months, anchorDay)
 	}
 	return next
 }
@@ -111,7 +132,17 @@ func catchUp(due time.Time, months int, today time.Time) time.Time {
 // AddMonthsClamped adds months to t, clamping the day of month when the
 // target month is shorter (Jan 31 + 1 month → Feb 28/29).
 func AddMonthsClamped(t time.Time, months int) time.Time {
+	return addMonthsAnchored(t, months, 0)
+}
+
+// addMonthsAnchored moves t months forward aiming for anchorDay (t's own day
+// when anchorDay is outside 1..31), clamped to the last day of a shorter
+// target month.
+func addMonthsAnchored(t time.Time, months, anchorDay int) time.Time {
 	y, m, d := t.Date()
+	if anchorDay >= 1 && anchorDay <= 31 {
+		d = anchorDay
+	}
 	// First of the target month, then find its length.
 	first := time.Date(y, m+time.Month(months), 1, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
 	lastDay := first.AddDate(0, 1, -1).Day()

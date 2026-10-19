@@ -45,7 +45,7 @@ func TestCatchUpKeepsMonthEndAnchor(t *testing.T) {
 		{"2026-01-31", "2026-01-31", "2026-01-31", 1},
 	}
 	for _, c := range cases {
-		got := catchUp(day(c.due), c.months, day(c.today))
+		got := catchUp(day(c.due), c.months, day(c.today), 0)
 		if got.Format(time.DateOnly) != c.want {
 			t.Errorf("catchUp(%s, %d, today %s) = %s, want %s",
 				c.due, c.months, c.today, got.Format(time.DateOnly), c.want)

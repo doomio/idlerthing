@@ -188,7 +188,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
         <span class="field-label">Currency</span>
         <select name="currency">
           {{range $v.Currencies}}
-          <option value="{{.}}" {{if $v.Pricing}}{{if eq $v.Pricing.Currency .}}selected{{end}}{{else}}{{if eq . "USD"}}selected{{end}}{{end}}>{{.}}</option>
+          <option value="{{.}}" {{if $v.Pricing}}{{if eq $v.Pricing.Currency .}}selected{{end}}{{else}}{{if eq . $v.DefaultCurrency}}selected{{end}}{{end}}>{{.}}</option>
           {{end}}
         </select>
       </label>

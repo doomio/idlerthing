@@ -52,6 +52,7 @@ type serverRow struct {
 	ID            int64
 	Hostname      string
 	HostnameTitle string // full hostname for the title attr when shortened
+	PingHost      string // full hostname: ping must target it, never the truncation
 	PortNote      string // e.g. ":2222" when non-default
 	Active        bool
 	Type          string
@@ -186,6 +187,7 @@ func makeServerRow(it model.ServerListItem, dueSoonDays int) serverRow {
 	row := serverRow{
 		ID:       it.ID,
 		Hostname: it.Hostname,
+		PingHost: it.Hostname,
 		Active:   it.Active,
 		Type:     model.ServerTypeLabel(it.ServerType),
 		OS:       dash(it.OSName),
@@ -329,6 +331,10 @@ func (s *Server) handleServerDetail(w http.ResponseWriter, r *http.Request) {
 		Extras:      extras,
 		Live:        s.buildLive(r, metrics, srv.Hostname),
 		YABSCommand: s.yabsCommand(r, srv.ID),
+		// The command URL follows the browser's address when no base URL
+		// is configured — say so, so a spoofed Host cannot silently steer
+		// the ingest (and its signed capability) elsewhere.
+		YABSBaseFromHost: s.baseURL == "",
 	}
 	if h := matchLive(metrics, srv.Hostname); h != nil {
 		view.LiveMon = s.liveMonEntry(r, h.Instance)
@@ -350,20 +356,23 @@ func (s *Server) handleServerDetail(w http.ResponseWriter, r *http.Request) {
 
 // serverDetailView is the template payload for the detail page.
 type serverDetailView struct {
-	Server       *model.Server
-	Disks        []model.ServerDisk
-	Pricing      *model.Pricing
-	OS           string
-	Provider     string
-	Location     string
-	TypeLabel    string
-	Extras       *extrasView
-	Live         *liveView
-	LiveMon      *liveMonView
-	YABSCommand  string
-	YABSRuns     []yabsRow
-	LatestSingle string
-	LatestMulti  string
+	Server      *model.Server
+	Disks       []model.ServerDisk
+	Pricing     *model.Pricing
+	OS          string
+	Provider    string
+	Location    string
+	TypeLabel   string
+	Extras      *extrasView
+	Live        *liveView
+	LiveMon     *liveMonView
+	YABSCommand string
+	// YABSBaseFromHost is set when the ingest URL follows the request Host
+	// because IDLER_BASE_URL is unset; the card shows a caution.
+	YABSBaseFromHost bool
+	YABSRuns         []yabsRow
+	LatestSingle     string
+	LatestMulti      string
 }
 
 // lookupNames resolves os/provider/display names for a server.
@@ -391,18 +400,20 @@ func (s *Server) lookupNames(r *http.Request, srv *model.Server) [3]string {
 
 // serverFormView is the template payload for new/edit forms.
 type serverFormView struct {
-	Action       string // form action URL
-	IsEdit       bool
-	Server       *model.Server
-	Disks        []model.ServerDisk // padded to 4 rows in the template
-	Pricing      *model.Pricing
-	Providers    []model.CatalogItem
-	Locations    []model.CatalogItem
-	OSes         []model.CatalogItem
-	Currencies   []string
-	NetworkTypes []string
-	DiskMedia    []string
-	Errors       map[string]string
+	Action     string // form action URL
+	IsEdit     bool
+	Server     *model.Server
+	Disks      []model.ServerDisk // padded to 4 rows in the template
+	Pricing    *model.Pricing
+	Providers  []model.CatalogItem
+	Locations  []model.CatalogItem
+	OSes       []model.CatalogItem
+	Currencies []string
+	// DefaultCurrency pre-fills the currency select when no pricing exists.
+	DefaultCurrency string
+	NetworkTypes    []string
+	DiskMedia       []string
+	Errors          map[string]string
 }
 
 // handleServerNew renders GET /servers/new.
@@ -446,6 +457,7 @@ func (s *Server) renderServerForm(w http.ResponseWriter, r *http.Request, view s
 		view.OSes, _ = s.catalogs.List(r.Context(), model.Catalogs["os"])
 	}
 	view.Currencies = currencies
+	view.DefaultCurrency = s.defaultCurrency(r)
 	view.NetworkTypes = networkTypes
 	view.DiskMedia = diskMediaTypes
 
@@ -531,6 +543,22 @@ func (s *Server) handleServerDelete(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, routeServers, http.StatusSeeOther)
 }
 
+// Hostnames and short free-text columns get bounded lengths. SQLite TEXT is
+// unbounded, so nothing else stops a runaway paste from being stored verbatim
+// and re-rendered on every page that shows the field. The hostname cap matches
+// the DNS total-name limit the importer enforces (253 bytes).
+const (
+	maxHostnameBytes = 253
+	maxTextBytes     = 255
+)
+
+// tooLong records errs[name] when an already-trimmed value exceeds max bytes.
+func tooLong(errs map[string]string, name, v string, max int) {
+	if len(v) > max {
+		errs[name] = "Too long — keep it under " + strconv.Itoa(max) + " bytes."
+	}
+}
+
 // parseServerForm parses + validates the server form. Returned errors are
 // keyed by field name for inline display.
 func parseServerForm(r *http.Request) (*model.Server, []model.ServerDisk, *model.Pricing, map[string]string) {
@@ -545,6 +573,8 @@ func parseServerForm(r *http.Request) (*model.Server, []model.ServerDisk, *model
 	}
 	if srv.Hostname == "" {
 		errs["hostname"] = "Hostname is required."
+	} else {
+		tooLong(errs, "hostname", srv.Hostname, maxHostnameBytes)
 	}
 	if srv.ServerType < model.TypeKVM || srv.ServerType > model.TypeNAT {
 		srv.ServerType = model.TypeKVM
@@ -562,6 +592,10 @@ func parseServerForm(r *http.Request) (*model.Server, []model.ServerDisk, *model
 	srv.NetworkType = nullStrFormValue(r, "network_type")
 	srv.Ns1 = nullStrFormValue(r, "ns1")
 	srv.Ns2 = nullStrFormValue(r, "ns2")
+	tooLong(errs, "cpu_model", srv.CPUModel.String, maxTextBytes)
+	tooLong(errs, "network_type", srv.NetworkType.String, maxTextBytes)
+	tooLong(errs, "ns1", srv.Ns1.String, maxTextBytes)
+	tooLong(errs, "ns2", srv.Ns2.String, maxTextBytes)
 	srv.OwnedSince = dateFormValue(r, errs, "owned_since")
 
 	var disks []model.ServerDisk

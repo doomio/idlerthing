@@ -65,6 +65,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
           {{end}}
         </select>
       </label>
+      {{/* This form has no shared/reseller pickers, but the update writes
+           both columns: carry the existing links through so editing a
+           record does not silently unlink it from its hosting service. */}}
+      <input type="hidden" name="shared_id" value="{{if $d.SharedID.Valid}}{{$d.SharedID.Int64}}{{end}}">
+      <input type="hidden" name="reseller_id" value="{{if $d.ResellerID.Valid}}{{$d.ResellerID.Int64}}{{end}}">
     </div>
   </section>
   <div class="form-actions">

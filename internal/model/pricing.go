@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Pricing service types (polymorphic service_id + service_type).
@@ -91,7 +92,10 @@ type Pricing struct {
 	Price       float64
 	Term        int
 	NextDueDate sql.NullString
-	Active      bool
+	// DueDay is the month-end anchor for rollovers (migration 0017).
+	// NULL means "fall back to NextDueDate's day".
+	DueDay sql.NullInt64
+	Active bool
 }
 
 // TermMonths returns the billing cycle length in months, or 0 for one-time.
@@ -211,16 +215,28 @@ func upsertPricingTx(ctx context.Context, tx *sql.Tx, serviceType int, serviceID
 	if p.Term < TermMonthly || p.Term > TermOneTime {
 		return fmt.Errorf("invalid pricing term %d", p.Term)
 	}
+	// Derive the month-end anchor for new or changed dates (migration 0017).
+	// The upsert preserves an existing anchor when the date is unchanged:
+	// saving a clamped February date must keep the original billing day.
+	var dueDay sql.NullInt64
+	if p.NextDueDate.Valid {
+		if t, err := time.Parse(time.DateOnly, p.NextDueDate.String); err == nil {
+			dueDay = sql.NullInt64{Int64: int64(t.Day()), Valid: true}
+		}
+	}
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO pricings (service_id, service_type, currency, price, term, next_due_date)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO pricings (service_id, service_type, currency, price, term, next_due_date, due_day)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (service_id, service_type) DO UPDATE SET
 			currency = excluded.currency,
 			price = excluded.price,
 			term = excluded.term,
 			next_due_date = excluded.next_due_date,
+			due_day = CASE
+				WHEN pricings.next_due_date IS excluded.next_due_date AND pricings.due_day IS NOT NULL
+				THEN pricings.due_day ELSE excluded.due_day END,
 			active = 1,
 			updated_at = CURRENT_TIMESTAMP`,
-		p.ServiceID, p.ServiceType, p.Currency, p.Price, p.Term, p.NextDueDate)
+		p.ServiceID, p.ServiceType, p.Currency, p.Price, p.Term, p.NextDueDate, dueDay)
 	return err
 }
