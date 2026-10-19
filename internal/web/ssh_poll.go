@@ -449,6 +449,28 @@ func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (sshPollResult, erro
 	return collectSSHMetricsResult(ctx, b, runSSHCommand)
 }
 
+func parseDockerSnapshot(raw string) (string, error) {
+	if len(raw) > 16384 {
+		return "", errors.New("Docker snapshot too large")
+	}
+	var containers []struct{ State string }
+	dec := json.NewDecoder(strings.NewReader(raw))
+	if err := dec.Decode(&containers); err != nil || containers == nil || dec.Decode(new(any)) != io.EOF {
+		return "", errors.New("invalid Docker snapshot")
+	}
+	running := 0
+	for _, c := range containers {
+		switch c.State {
+		case "running":
+			running++
+		case "created", "restarting", "removing", "paused", "exited", "dead":
+		default:
+			return "", errors.New("invalid Docker container state")
+		}
+	}
+	return "Docker containers: " + strconv.Itoa(len(containers)) + " (" + strconv.Itoa(running) + " running)", nil
+}
+
 func collectSSHMetrics(ctx context.Context, b *model.Seedbox, run func(context.Context, *model.Seedbox, string, time.Duration, int) (string, error)) (string, error) {
 	result, err := collectSSHMetricsResult(ctx, b, run)
 	return result.Summary, err
@@ -520,6 +542,21 @@ func collectSSHMetricsResult(ctx context.Context, b *model.Seedbox, run func(con
 			failures++
 		}
 	}
+	if b.SSHDockerMetrics {
+		// Only the authenticated account's rootless socket; fixed GET, no forwarding.
+		out, err := run(ctx, b, `curl -q --silent --show-error --fail --max-time 8 --noproxy '*' --unix-socket "/run/user/$(id -u)/docker.sock" 'http://localhost/v1.41/containers/json?all=1'`, sshPollTimeout, 16384)
+		if err == nil {
+			var summary string
+			summary, err = parseDockerSnapshot(out)
+			if err == nil {
+				results = append(results, summary)
+			}
+		}
+		if err != nil {
+			results = append(results, "Docker observation unavailable")
+			failures++
+		}
+	}
 	if len(results) == 0 {
 		return poll, errors.New("no SSH metrics selected")
 	}
@@ -549,7 +586,7 @@ func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "SSH polling disabled", http.StatusForbidden)
 		return
 	}
-	if !b.SSHHostMetrics && !b.SSHMemoryMetrics && !b.SSHDirectoryMetrics && !b.SSHQuotaMetrics && !b.SSHTrafficMetrics {
+	if !b.SSHHostMetrics && !b.SSHMemoryMetrics && !b.SSHDirectoryMetrics && !b.SSHQuotaMetrics && !b.SSHTrafficMetrics && !b.SSHDockerMetrics {
 		http.Error(w, "No SSH metrics selected", http.StatusForbidden)
 		return
 	}

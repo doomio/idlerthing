@@ -995,8 +995,8 @@ func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 		res, err := imp.tx.ExecContext(ctx, `
 			INSERT INTO seedboxes (title, hostname, seed_box_type, provider_id, location_id,
 				port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo, owned_since,
-				pm_service_id, ssh_poll_enabled, ssh_user, ssh_host_metrics, ssh_memory_metrics, ssh_directory_metrics, ssh_quota_metrics, ssh_traffic_metrics, qbt_enabled)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				pm_service_id, ssh_poll_enabled, ssh_user, ssh_host_metrics, ssh_memory_metrics, ssh_directory_metrics, ssh_quota_metrics, ssh_traffic_metrics, qbt_enabled, ssh_docker_metrics)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			sgetN(b, "title"), sget(b, "hostname"), sgetN(b, "seed_box_type"),
 			imp.remapCatalog("providers", nget(b, "provider_id")),
 			imp.remapCatalog("locations", nget(b, "location_id")),
@@ -1005,7 +1005,7 @@ func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 			imp.boundedInt(nget(b, "bandwidth_as_mb"), 1<<30, "bandwidth_as_mb", sget(b, "hostname")),
 			bint(bget(b, "active")), bint(bget(b, "show_public")),
 			bint(bget(b, "was_promo")), imp.normOwned(sgetN(b, "owned_since"), sget(b, "hostname")),
-			nget(b, "pm_service_id"), bint(sshEnabled), sshUser, bint(sshEnabled && bget(b, "ssh_host_metrics")), bint(sshEnabled && bget(b, "ssh_memory_metrics")), bint(sshEnabled && bget(b, "ssh_directory_metrics")), bint(sshEnabled && bget(b, "ssh_quota_metrics")), bint(sshEnabled && bget(b, "ssh_traffic_metrics")), bint(sshEnabled && bget(b, "qbt_enabled")))
+			nget(b, "pm_service_id"), bint(sshEnabled), sshUser, bint(sshEnabled && bget(b, "ssh_host_metrics")), bint(sshEnabled && bget(b, "ssh_memory_metrics")), bint(sshEnabled && bget(b, "ssh_directory_metrics")), bint(sshEnabled && bget(b, "ssh_quota_metrics")), bint(sshEnabled && bget(b, "ssh_traffic_metrics")), bint(sshEnabled && bget(b, "qbt_enabled")), bint(sshEnabled && bget(b, "ssh_docker_metrics")))
 		if err != nil {
 			return fmt.Errorf("import seedbox %q: %w", sget(b, "hostname"), err)
 		}

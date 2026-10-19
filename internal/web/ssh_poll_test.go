@@ -36,6 +36,53 @@ import (
 	"idlerthing/internal/model"
 )
 
+func TestDockerObservationOptIn(t *testing.T) {
+	_, db, _ := newTestServerFull(t)
+	store := &model.SeedboxStore{DB: db}
+	id, err := store.Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := store.Get(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.SSHDockerMetrics {
+		t.Fatal("Docker must default off")
+	}
+	called := false
+	run := func(_ context.Context, _ *model.Seedbox, command string, _ time.Duration, limit int) (string, error) {
+		called = true
+		if !strings.Contains(command, `--unix-socket "/run/user/$(id -u)/docker.sock"`) || !strings.Contains(command, "/containers/json?all=1") || limit > 16384 {
+			t.Fatalf("unsafe command/limit: %q %d", command, limit)
+		}
+		return `[{"State":"running"},{"State":"exited"}]`, nil
+	}
+	if _, err := collectSSHMetrics(t.Context(), b, run); err == nil || called {
+		t.Fatal("disabled observation ran")
+	}
+	b.SSHPollEnabled, b.SSHDockerMetrics, b.SSHUser = true, true, "tenant"
+	if err := store.Update(t.Context(), b, nil); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err = store.Get(t.Context(), id)
+	if err != nil || !b.SSHDockerMetrics {
+		t.Fatalf("toggle lost: %v", err)
+	}
+	got, err := collectSSHMetrics(t.Context(), b, run)
+	if err != nil || !called || got != "Docker containers: 2 (1 running)" {
+		t.Fatalf("observation: %q %v", got, err)
+	}
+}
+
+func TestDockerSnapshotRejectsBadInput(t *testing.T) {
+	for _, raw := range []string{`{"bad":1}`, `[{"State":"running"},{}]`, `[{"State":"\u0000"}]`, `not json`, strings.Repeat("x", 16385)} {
+		if _, err := parseDockerSnapshot(raw); err == nil {
+			t.Fatalf("accepted %q", raw)
+		}
+	}
+}
+
 func TestSSHPollMetricsFlagsDefaultOff(t *testing.T) {
 	_, db, _ := newTestServerFull(t)
 	id, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true}, nil)
@@ -390,7 +437,7 @@ func TestAccountOnlyPollOptIn(t *testing.T) {
 
 func TestSSHPollExportImportRoundTrip(t *testing.T) {
 	ts, db, _ := newTestServerFull(t)
-	_, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHHostMetrics: true, SSHMemoryMetrics: true, SSHDirectoryMetrics: true, SSHQuotaMetrics: true, SSHTrafficMetrics: true}, nil)
+	_, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHHostMetrics: true, SSHMemoryMetrics: true, SSHDirectoryMetrics: true, SSHQuotaMetrics: true, SSHTrafficMetrics: true, SSHDockerMetrics: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +451,7 @@ func TestSSHPollExportImportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(body, []byte(`"ssh_poll_enabled":true`)) || !bytes.Contains(body, []byte(`"ssh_user":"demo"`)) || !bytes.Contains(body, []byte(`"ssh_host_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_memory_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_directory_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_quota_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_traffic_metrics":true`)) {
+	if !bytes.Contains(body, []byte(`"ssh_poll_enabled":true`)) || !bytes.Contains(body, []byte(`"ssh_user":"demo"`)) || !bytes.Contains(body, []byte(`"ssh_host_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_memory_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_directory_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_quota_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_traffic_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_docker_metrics":true`)) {
 		t.Fatal("SSH opt-in absent from export")
 	}
 	restored := freshDB(t)
@@ -412,7 +459,7 @@ func TestSSHPollExportImportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _, err := (&model.SeedboxStore{DB: restored}).Get(t.Context(), 1)
-	if err != nil || !b.SSHPollEnabled || b.SSHUser != "demo" || !b.SSHHostMetrics || !b.SSHMemoryMetrics || !b.SSHDirectoryMetrics || !b.SSHQuotaMetrics || !b.SSHTrafficMetrics {
+	if err != nil || !b.SSHPollEnabled || b.SSHUser != "demo" || !b.SSHHostMetrics || !b.SSHMemoryMetrics || !b.SSHDirectoryMetrics || !b.SSHQuotaMetrics || !b.SSHTrafficMetrics || !b.SSHDockerMetrics {
 		t.Fatalf("SSH opt-in lost on restore: %+v %v", b, err)
 	}
 }

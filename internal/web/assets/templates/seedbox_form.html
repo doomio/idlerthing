@@ -142,6 +142,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       <label class="field"><span class="field-label">Top-level home directory sizes (slow)</span>
         <input type="checkbox" name="ssh_directory_metrics" value="on" {{if $b.SSHDirectoryMetrics}}checked{{end}}>
       </label>
+      <label class="field"><span class="field-label">Rootless Docker container counts (read-only)</span>
+        <input type="checkbox" name="ssh_docker_metrics" value="on" {{if $b.SSHDockerMetrics}}checked{{end}}>
+      </label>
       <label class="field"><span class="field-label">PMSS account disk quota</span>
         <input type="checkbox" name="ssh_quota_metrics" value="on" {{if $b.SSHQuotaMetrics}}checked{{end}}>
       </label>
