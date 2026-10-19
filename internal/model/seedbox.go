@@ -157,6 +157,11 @@ func (st *SeedboxStore) Update(ctx context.Context, b *Seedbox, pricing *Pricing
 	if n, _ := res.RowsAffected(); n == 0 {
 		return sql.ErrNoRows
 	}
+	if !b.SSHDirectoryMetrics || !b.SSHPollEnabled {
+		if _, err := tx.ExecContext(ctx, `UPDATE ssh_observations SET directory_entries = '', directory_rest_count = 0, directory_rest_size = 0, directory_at = '' WHERE seedbox_id = ?`, b.ID); err != nil {
+			return fmt.Errorf("clear directory observation: %w", err)
+		}
+	}
 	if err := upsertPricingTx(ctx, tx, ServiceSeedbox, b.ID, pricing); err != nil {
 		return err
 	}

@@ -986,12 +986,8 @@ func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 			continue
 		}
 		sshUser := sget(b, "ssh_user")
-		sshEnabled := bget(b, "ssh_poll_enabled")
-		if sshEnabled && (sshUser == "" || len(sshUser) > 64 || strings.HasPrefix(sshUser, "-") || strings.IndexFunc(sshUser, func(c rune) bool {
-			return !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-", c)
-		}) >= 0) {
-			sshEnabled = false // imported data never turns on an unusable target
-		}
+		// Imported inventory never grants network polling consent on this instance.
+		sshEnabled := false
 		res, err := imp.tx.ExecContext(ctx, `
 			INSERT INTO seedboxes (title, hostname, seed_box_type, provider_id, location_id,
 				port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo, owned_since,

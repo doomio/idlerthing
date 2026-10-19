@@ -105,8 +105,8 @@ func TestQBTDetailAndExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	box, _, err := (&model.SeedboxStore{DB: restored}).Get(t.Context(), 1)
-	if err != nil || !box.QBTEnabled {
-		t.Fatalf("import lost opt-in: %+v %v", box, err)
+	if err != nil || box.QBTEnabled || box.SSHPollEnabled {
+		t.Fatalf("restored qBittorrent requires local re-opt-in: %+v %v", box, err)
 	}
 }
 

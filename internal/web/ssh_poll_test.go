@@ -257,6 +257,30 @@ func TestDirectoryUsageSelectionAndBounds(t *testing.T) {
 	}
 }
 
+func TestDisableDirectoryObservationErasesPrivateNames(t *testing.T) {
+	_, db, _ := newTestServerFull(t)
+	store := &model.SeedboxStore{DB: db}
+	id, err := store.Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHDirectoryMetrics: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO ssh_observations (seedbox_id, attempted_at, directory_entries, directory_at) VALUES (?, ?, ?, ?)`, id, "2026-10-18 22:00:00 UTC", `[{"name":"private-folder","bytes":123}]`, "2026-10-18 22:00:00 UTC"); err != nil {
+		t.Fatal(err)
+	}
+	box, pricing, err := store.Get(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	box.SSHDirectoryMetrics = false
+	if err := store.Update(t.Context(), box, pricing); err != nil {
+		t.Fatal(err)
+	}
+	var retained string
+	if err := db.QueryRow(`SELECT directory_entries FROM ssh_observations WHERE seedbox_id = ?`, id).Scan(&retained); err != nil || retained != "" {
+		t.Fatalf("private directory names retained: %q %v", retained, err)
+	}
+}
+
 func TestDirectoryCommandScopedToHome(t *testing.T) {
 	if _, err := exec.LookPath("du"); err != nil {
 		t.Skip("du unavailable")
@@ -459,8 +483,8 @@ func TestSSHPollExportImportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _, err := (&model.SeedboxStore{DB: restored}).Get(t.Context(), 1)
-	if err != nil || !b.SSHPollEnabled || b.SSHUser != "demo" || !b.SSHHostMetrics || !b.SSHMemoryMetrics || !b.SSHDirectoryMetrics || !b.SSHQuotaMetrics || !b.SSHTrafficMetrics || !b.SSHDockerMetrics {
-		t.Fatalf("SSH opt-in lost on restore: %+v %v", b, err)
+	if err != nil || b.SSHPollEnabled || b.SSHUser != "demo" || b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics || b.SSHQuotaMetrics || b.SSHTrafficMetrics || b.SSHDockerMetrics {
+		t.Fatalf("restored SSH settings require local re-opt-in: %+v %v", b, err)
 	}
 }
 

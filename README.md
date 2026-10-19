@@ -187,6 +187,8 @@ JSON/CSV exports do not include the key; restore it separately if needed.
 
 Seedboxes remain passive unless you opt a box in under **Edit seedbox →
 Optional SSH polling** and press **Poll SSH metrics** on its detail page.
+An imported backup restores inventory and SSH username, but deliberately
+resets every network-polling switch; re-enable each locally after restore.
 Manual read-only polling fetches only the host load and memory metrics you
 select. Separate account disk-quota and traffic-limit/throttle options read
 only the chosen PMSS accounting files. The directory option measures
