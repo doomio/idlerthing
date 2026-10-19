@@ -22,9 +22,32 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestMigrationVersionsUnique(t *testing.T) {
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[int]string{}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		prefix, _, _ := strings.Cut(entry.Name(), "_")
+		version, err := strconv.Atoi(prefix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prior := seen[version]; prior != "" {
+			t.Fatalf("migration version %d reused by %s and %s", version, prior, entry.Name())
+		}
+		seen[version] = entry.Name()
+	}
+}
 
 var expectedTables = []string{
 	"servers", "server_disks", "shared_hosting", "reseller_hosting",
