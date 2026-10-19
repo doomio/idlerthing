@@ -172,12 +172,33 @@ toggle and never count towards the totals.
 The fleet view reads the cache only, so a slow or failing feed never blocks a
 page; it shows when it was last synced and marks stale data.
 
-Nothing is installed on a seedbox and no connection is made to one: the feed
-is a single outbound HTTPS request to `pulsedmedia.com`. The API key reaches
+Nothing is installed on a seedbox. With SSH polling off (the default), no
+connection is made to one: the feed is a single outbound HTTPS request to
+`pulsedmedia.com`. The API key reaches
 no export, no JSON API response and no unauthenticated route. The key **is**
 stored in the SQLite database; protect the DB, its WAL/SHM files and any raw
 backups as secrets (the app sets DB/WAL/SHM permissions to 0600). Application
 JSON/CSV exports do not include the key; restore it separately if needed.
+
+## Optional SSH load polling
+
+Seedboxes remain passive unless you opt a box in under **Edit seedbox →
+Optional SSH polling** and press **Poll SSH load** on its detail page. This
+first read-only poll fetches `/proc/loadavg` over SSH and shows 1/5/15-minute
+host load; it does not collect CPU/RAM, I/O, qBittorrent or Docker yet. No
+background job, agent, or seedbox installation is involved.
+
+The app's OS user needs a non-interactive, unencrypted SSH private key
+(standard `~/.ssh/id_*` files with private permissions) and a pre-verified
+entry for that hostname in `~/.ssh/known_hosts`. Strict host-key checking is
+required; never trust a key obtained from an unverified network scan. The
+app stores only the opt-in and SSH username, never a password or private key.
+Disabled/inactive boxes are never polled. A poll times out after 12 seconds
+and reports failure without showing SSH output or changing inventory. If the
+app runs as a systemd `DynamicUser`, provision its SSH identity and
+known_hosts via a private credential/home mechanism before enabling this
+option; the default service unit does not provide them. Do not enable it if
+the app host should have no network path to your boxes.
 
 ## Configuration
 

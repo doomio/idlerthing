@@ -183,3 +183,33 @@ func TestServiceListFilterSearch(t *testing.T) {
 		}
 	})
 }
+
+func TestSeedboxListPreservesSSHSettings(t *testing.T) {
+	st := &SeedboxStore{DB: testDB(t)}
+	boxes := []Seedbox{
+		{Hostname: "a.example.net", Active: true},
+		{Hostname: "b.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo"},
+		{Hostname: "c.example.net", Active: true, SSHUser: "saved-user"},
+	}
+	for i := range boxes {
+		id, err := st.Create(t.Context(), &boxes[i], nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		boxes[i].ID = id
+	}
+	items, err := st.List(t.Context(), ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != len(boxes) {
+		t.Fatalf("got %d seedboxes, want %d", len(items), len(boxes))
+	}
+	for i, item := range items {
+		want := boxes[i]
+		if item.ID != want.ID || item.SSHPollEnabled != want.SSHPollEnabled || item.SSHUser != want.SSHUser {
+			t.Errorf("seedbox %d: got ID=%d enabled=%v user=%q; want ID=%d enabled=%v user=%q",
+				i, item.ID, item.SSHPollEnabled, item.SSHUser, want.ID, want.SSHPollEnabled, want.SSHUser)
+		}
+	}
+}
