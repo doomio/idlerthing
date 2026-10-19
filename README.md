@@ -170,7 +170,10 @@ monthly cost. Cancelled and suspended services sit behind a **Show cancelled**
 toggle and never count towards the totals.
 
 The fleet view reads the cache only, so a slow or failing feed never blocks a
-page; it shows when it was last synced and marks stale data.
+page. It shows the most recent sync time and marks stale data per provider — a
+provider whose feed has stopped is flagged on its cards, and the header shows a
+single stale badge meaning at least one provider's feed is older than six hours,
+even when another provider synced recently.
 
 Nothing is installed on a seedbox. With SSH polling off (the default), no
 connection is made to one: the feed is a single outbound HTTPS request to
