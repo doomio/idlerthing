@@ -124,6 +124,70 @@ func TestAccountMetricOptInsAndParsing(t *testing.T) {
 	}
 }
 
+func TestDirectoryBreakdownPersistenceFailureAndExport(t *testing.T) {
+	ts, db, srv := newTestServerFull(t)
+	id, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHDirectoryMetrics: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateName := "private-directory-marker"
+	srv.sshPoll = func(context.Context, *model.Seedbox) (sshPollResult, error) {
+		return sshPollResult{Summary: "Top-level home entries: 1", DirectoryOK: true, Directory: []directoryEntry{{Name: privateName, Size: 1048576}}}, nil
+	}
+	poll := func() {
+		req := httptest.NewRequest(http.MethodPost, "/seedboxes/"+strconv.FormatInt(id, 10)+"/poll", nil)
+		req.SetPathValue("id", strconv.FormatInt(id, 10))
+		w := httptest.NewRecorder()
+		srv.handleSeedboxPoll(w, req)
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("poll: %d", w.Code)
+		}
+	}
+	poll()
+	var data, at string
+	if err := db.QueryRow(`SELECT directory_entries, directory_at FROM ssh_observations WHERE seedbox_id = ?`, id).Scan(&data, &at); err != nil || !strings.Contains(data, privateName) || at == "" {
+		t.Fatalf("stored: %q %q %v", data, at, err)
+	}
+	srv.sshPoll = func(context.Context, *model.Seedbox) (sshPollResult, error) {
+		return sshPollResult{}, errors.New(privateName)
+	}
+	poll()
+	var after, afterAt string
+	if err := db.QueryRow(`SELECT directory_entries, directory_at FROM ssh_observations WHERE seedbox_id = ?`, id).Scan(&after, &afterAt); err != nil || after != data || afterAt != at {
+		t.Fatal("failed poll discarded last directory result")
+	}
+	client := authedClient(t, ts)
+	for _, path := range []string{"/seedboxes/" + strconv.FormatInt(id, 10), "/export/json", "/export/csv"} {
+		resp, err := client.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contains := bytes.Contains(body, []byte(privateName))
+		if strings.HasPrefix(path, "/seedboxes/") != contains {
+			t.Fatalf("privacy %s: name present=%v", path, contains)
+		}
+	}
+}
+
+func TestDirectoryBreakdownBoundedAndPrivate(t *testing.T) {
+	var raw strings.Builder
+	for i := 0; i < 700; i++ {
+		raw.WriteString(strconv.Itoa(i+1) + "\t./item" + strconv.Itoa(i) + "\x00")
+	}
+	entries, restCount, restSize, err := parseSSHDirectoryBreakdown(raw.String())
+	if err != nil || len(entries) != 500 || restCount != 200 || restSize != 20100 || entries[0].Name != "item699" {
+		t.Fatalf("breakdown: %d %d %d %v", len(entries), restCount, restSize, err)
+	}
+	if _, _, _, err := parseSSHDirectoryBreakdown("1\t./bad/name\x00"); err == nil {
+		t.Fatal("accepted nested path")
+	}
+}
+
 func TestDirectoryUsageSelectionAndBounds(t *testing.T) {
 	box := &model.Seedbox{SSHDirectoryMetrics: true}
 	if got := sshDirectoryCommand(box); !strings.Contains(got, `cd "$HOME"`) || !strings.Contains(got, "du -0 -xs -B1 --") || !strings.Contains(got, "nice -n19") {
@@ -203,8 +267,8 @@ func TestSSHObservationPersistsAcrossViewAndFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.sshPoll = func(context.Context, *model.Seedbox) (string, error) {
-		return "Top-level home entries: 2 (3 MB total)", nil
+	srv.sshPoll = func(context.Context, *model.Seedbox) (sshPollResult, error) {
+		return sshPollResult{Summary: "Top-level home entries: 2 (3 MB total)"}, nil
 	}
 	poll := func() {
 		req := httptest.NewRequest(http.MethodPost, "/seedboxes/1/poll", nil)
@@ -228,7 +292,9 @@ func TestSSHObservationPersistsAcrossViewAndFailure(t *testing.T) {
 	if result != "Top-level home entries: 2 (3 MB total)" || successAt == "" || attemptedAt == "" || lastError != "" {
 		t.Fatalf("saved observation: %q %q %q %q", result, successAt, attemptedAt, lastError)
 	}
-	srv.sshPoll = func(context.Context, *model.Seedbox) (string, error) { return "", errors.New("private remote error") }
+	srv.sshPoll = func(context.Context, *model.Seedbox) (sshPollResult, error) {
+		return sshPollResult{}, errors.New("private remote error")
+	}
 	poll()
 	read()
 	if result != "Top-level home entries: 2 (3 MB total)" || lastError == "" || strings.Contains(lastError, "private") {
@@ -276,12 +342,12 @@ func TestDirectoryOnlyPollOptIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	srv.sshPoll = func(_ context.Context, box *model.Seedbox) (string, error) {
+	srv.sshPoll = func(_ context.Context, box *model.Seedbox) (sshPollResult, error) {
 		called = true
 		if box.ID != id || !box.SSHDirectoryMetrics || box.SSHHostMetrics || box.SSHMemoryMetrics {
 			t.Fatalf("wrong metrics: %+v", box)
 		}
-		return "Top-level home entries: 2", nil
+		return sshPollResult{Summary: "Top-level home entries: 2"}, nil
 	}
 	req := httptest.NewRequest(http.MethodPost, "/seedboxes/1/poll", nil)
 	req.SetPathValue("id", "1")
@@ -306,12 +372,12 @@ func TestAccountOnlyPollOptIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	srv.sshPoll = func(_ context.Context, box *model.Seedbox) (string, error) {
+	srv.sshPoll = func(_ context.Context, box *model.Seedbox) (sshPollResult, error) {
 		called = true
 		if box.ID != id || !box.SSHQuotaMetrics || box.SSHTrafficMetrics || box.SSHDirectoryMetrics {
 			t.Fatalf("wrong metric selection: %+v", box)
 		}
-		return "Account disk used / soft quota: 1 / 2 MiB", nil
+		return sshPollResult{Summary: "Account disk used / soft quota: 1 / 2 MiB"}, nil
 	}
 	req := httptest.NewRequest(http.MethodPost, "/seedboxes/1/poll", nil)
 	req.SetPathValue("id", "1")
@@ -386,12 +452,12 @@ func TestOptionalSSHPollEnabledUsesPinnedHost(t *testing.T) {
 		t.Fatalf("stored opt-in: %+v %v", b, err)
 	}
 	called := false
-	srv.sshPoll = func(_ context.Context, got *model.Seedbox) (string, error) {
+	srv.sshPoll = func(_ context.Context, got *model.Seedbox) (sshPollResult, error) {
 		called = true
 		if got.ID != id || got.Hostname != b.Hostname || got.SSHUser != "demo" {
 			t.Fatalf("wrong target: %+v", got)
 		}
-		return "0.14 0.10 0.05 1/100 123", nil
+		return sshPollResult{Summary: "0.14 0.10 0.05 1/100 123"}, nil
 	}
 	req := httptest.NewRequest(http.MethodPost, "/seedboxes/1/poll", nil)
 	req.SetPathValue("id", "1")

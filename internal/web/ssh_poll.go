@@ -19,6 +19,7 @@ package web
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -27,9 +28,11 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -192,6 +195,50 @@ func parseSSHDirectoryUsage(raw string) (int, int64, error) {
 		total += size
 	}
 	return count, total, nil
+}
+
+type directoryEntry struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
+// ponytail: O(entries*500); replace with a heap only if large home listings become slow.
+func parseSSHDirectoryBreakdown(raw string) ([]directoryEntry, int, int64, error) {
+	if len(raw) == 0 || len(raw) > 1<<20 || raw[len(raw)-1] != 0 {
+		return nil, 0, 0, errors.New("invalid directory snapshot")
+	}
+	if raw == "\x00" {
+		return nil, 0, 0, nil
+	}
+	var top []directoryEntry
+	var restCount int
+	var restSize int64
+	for _, line := range strings.Split(strings.TrimSuffix(raw, "\x00"), "\x00") {
+		value, name, ok := strings.Cut(line, "\t")
+		if !ok || !strings.HasPrefix(name, "./") || len(name) <= 2 || strings.ContainsAny(name[2:], "/\x00") || !utf8.ValidString(name) {
+			return nil, 0, 0, errors.New("invalid directory entry")
+		}
+		size, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || size < 0 || size > 1<<60 || restSize > 1<<60-size {
+			return nil, 0, 0, errors.New("invalid directory size")
+		}
+		entry := directoryEntry{Name: name[2:], Size: size}
+		idx := sort.Search(len(top), func(i int) bool { return top[i].Size < size || top[i].Size == size && top[i].Name > entry.Name })
+		if idx >= 500 {
+			restCount++
+			restSize += size
+			continue
+		}
+		top = append(top, directoryEntry{})
+		copy(top[idx+1:], top[idx:])
+		top[idx] = entry
+		if len(top) > 500 {
+			restCount++
+			restSize += top[500].Size
+			top = top[:500]
+		}
+	}
+	return top, restCount, restSize, nil
 }
 
 func dialPublicSSH(ctx context.Context, network, address string) (net.Conn, error) {
@@ -390,11 +437,25 @@ func runSSHCommand(ctx context.Context, b *model.Seedbox, command string, timeou
 	return out.String(), nil
 }
 
-func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
-	return collectSSHMetrics(ctx, b, runSSHCommand)
+type sshPollResult struct {
+	Summary     string
+	Directory   []directoryEntry
+	RestCount   int
+	RestSize    int64
+	DirectoryOK bool
+}
+
+func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (sshPollResult, error) {
+	return collectSSHMetricsResult(ctx, b, runSSHCommand)
 }
 
 func collectSSHMetrics(ctx context.Context, b *model.Seedbox, run func(context.Context, *model.Seedbox, string, time.Duration, int) (string, error)) (string, error) {
+	result, err := collectSSHMetricsResult(ctx, b, run)
+	return result.Summary, err
+}
+
+func collectSSHMetricsResult(ctx context.Context, b *model.Seedbox, run func(context.Context, *model.Seedbox, string, time.Duration, int) (string, error)) (sshPollResult, error) {
+	var poll sshPollResult
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	var results []string
@@ -433,13 +494,25 @@ func collectSSHMetrics(ctx context.Context, b *model.Seedbox, run func(context.C
 		}
 	}
 	if b.SSHDirectoryMetrics {
-		out, err := run(ctx, b, sshDirectoryCommand(b), 2*time.Minute, 8192)
+		out, err := run(ctx, b, sshDirectoryCommand(b), 2*time.Minute, 1<<20)
 		if err == nil {
-			var count int
-			var size int64
-			count, size, err = parseSSHDirectoryUsage(out)
+			var entries []directoryEntry
+			var restCount int
+			var restSize int64
+			entries, restCount, restSize, err = parseSSHDirectoryBreakdown(out)
 			if err == nil {
-				results = append(results, "Top-level home entries: "+strconv.Itoa(count)+" ("+fmtMB(size/(1024*1024))+" total)")
+				var total int64 = restSize
+				for _, entry := range entries {
+					if total > 1<<60-entry.Size {
+						err = errors.New("invalid directory total")
+						break
+					}
+					total += entry.Size
+				}
+				if err == nil {
+					poll.Directory, poll.RestCount, poll.RestSize, poll.DirectoryOK = entries, restCount, restSize, true
+					results = append(results, "Top-level home entries: "+strconv.Itoa(len(entries)+restCount)+" ("+fmtMB(total/(1024*1024))+" total)")
+				}
 			}
 		}
 		if err != nil {
@@ -448,12 +521,13 @@ func collectSSHMetrics(ctx context.Context, b *model.Seedbox, run func(context.C
 		}
 	}
 	if len(results) == 0 {
-		return "", errors.New("no SSH metrics selected")
+		return poll, errors.New("no SSH metrics selected")
 	}
 	if failures == len(results) {
-		return "", errors.New("SSH observations unavailable")
+		return poll, errors.New("SSH observations unavailable")
 	}
-	return strings.Join(results, "; "), nil
+	poll.Summary = strings.Join(results, "; ")
+	return poll, nil
 }
 
 func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
@@ -488,11 +562,22 @@ func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
 		}
 		s.setFlash(w, r, "err", "SSH poll failed at "+stamp+"; check SSH access, known_hosts and selected metric availability.")
 	} else {
-		if _, saveErr := s.db.ExecContext(r.Context(), `INSERT INTO ssh_observations (seedbox_id, result, success_at, attempted_at) VALUES (?, ?, ?, ?) ON CONFLICT(seedbox_id) DO UPDATE SET result = excluded.result, success_at = excluded.success_at, attempted_at = excluded.attempted_at, last_error = ''`, id, result, stamp, stamp); saveErr != nil {
+		if _, saveErr := s.db.ExecContext(r.Context(), `INSERT INTO ssh_observations (seedbox_id, result, success_at, attempted_at) VALUES (?, ?, ?, ?) ON CONFLICT(seedbox_id) DO UPDATE SET result = excluded.result, success_at = excluded.success_at, attempted_at = excluded.attempted_at, last_error = ''`, id, result.Summary, stamp, stamp); saveErr != nil {
 			http.Error(w, errMsgServerErr, http.StatusInternalServerError)
 			return
 		}
-		s.setFlash(w, r, "ok", stamp+": "+result)
+		if result.DirectoryOK {
+			data, marshalErr := json.Marshal(result.Directory)
+			if marshalErr != nil {
+				http.Error(w, errMsgServerErr, http.StatusInternalServerError)
+				return
+			}
+			if _, saveErr := s.db.ExecContext(r.Context(), `UPDATE ssh_observations SET directory_entries = ?, directory_rest_count = ?, directory_rest_size = ?, directory_at = ? WHERE seedbox_id = ?`, string(data), result.RestCount, result.RestSize, stamp, id); saveErr != nil {
+				http.Error(w, errMsgServerErr, http.StatusInternalServerError)
+				return
+			}
+		}
+		s.setFlash(w, r, "ok", stamp+": "+result.Summary)
 	}
 	http.Redirect(w, r, "/seedboxes/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }

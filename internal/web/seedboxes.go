@@ -18,6 +18,7 @@ package web
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -144,8 +145,10 @@ func (s *Server) seedboxSection() *section {
 			}
 			observation := infoCard{Title: "SSH observations", Pairs: []kvPair{{K: "Status", V: sshStatus}}}
 			if b.SSHPollEnabled {
-				var result, successAt, attemptedAt, lastError string
-				err := s.db.QueryRowContext(r.Context(), `SELECT result, success_at, attempted_at, last_error FROM ssh_observations WHERE seedbox_id = ?`, id).Scan(&result, &successAt, &attemptedAt, &lastError)
+				var result, successAt, attemptedAt, lastError, directoryData, directoryAt string
+				var restCount int
+				var restSize int64
+				err := s.db.QueryRowContext(r.Context(), `SELECT result, success_at, attempted_at, last_error, directory_entries, directory_rest_count, directory_rest_size, directory_at FROM ssh_observations WHERE seedbox_id = ?`, id).Scan(&result, &successAt, &attemptedAt, &lastError, &directoryData, &restCount, &restSize, &directoryAt)
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return nil, err
 				}
@@ -157,6 +160,19 @@ func (s *Server) seedboxSection() *section {
 				}
 				if lastError != "" {
 					observation.Pairs = append(observation.Pairs, kvPair{K: "Last error", V: lastError})
+				}
+				if b.SSHDirectoryMetrics && directoryAt != "" {
+					var entries []directoryEntry
+					if err := json.Unmarshal([]byte(directoryData), &entries); err != nil {
+						return nil, err
+					}
+					observation.Pairs = append(observation.Pairs, kvPair{K: "Directory scan (UTC)", V: directoryAt})
+					for _, entry := range entries {
+						observation.Pairs = append(observation.Pairs, kvPair{K: entry.Name, V: fmtMB(entry.Size / (1024 * 1024))})
+					}
+					if restCount > 0 {
+						observation.Pairs = append(observation.Pairs, kvPair{K: "Other entries (" + strconv.Itoa(restCount) + ")", V: fmtMB(restSize / (1024 * 1024))})
+					}
 				}
 			}
 			return &detailView{

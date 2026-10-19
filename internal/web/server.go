@@ -79,7 +79,7 @@ type Server struct {
 	// pmapiURL overrides the PulsedMedia feed endpoint (IDLER_PMAPI_URL).
 	// Empty uses the built-in URL; tests point it at a mock server.
 	pmapiURL string
-	sshPoll  func(context.Context, *model.Seedbox) (string, error)
+	sshPoll  func(context.Context, *model.Seedbox) (sshPollResult, error)
 
 	// pmSyncing serialises fleet syncs so a burst of clicks cannot launch
 	// several fetches at once (the provider rate-limits by key). Per-Server
