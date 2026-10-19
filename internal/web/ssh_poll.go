@@ -358,8 +358,16 @@ func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
 	result, err := s.sshPoll(r.Context(), b)
 	stamp := time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
 	if err != nil {
+		if _, saveErr := s.db.ExecContext(r.Context(), `INSERT INTO ssh_observations (seedbox_id, attempted_at, last_error) VALUES (?, ?, ?) ON CONFLICT(seedbox_id) DO UPDATE SET attempted_at = excluded.attempted_at, last_error = excluded.last_error`, id, stamp, "SSH observation unavailable"); saveErr != nil {
+			http.Error(w, errMsgServerErr, http.StatusInternalServerError)
+			return
+		}
 		s.setFlash(w, r, "err", "SSH poll failed at "+stamp+"; check SSH access, known_hosts and selected metric availability.")
 	} else {
+		if _, saveErr := s.db.ExecContext(r.Context(), `INSERT INTO ssh_observations (seedbox_id, result, success_at, attempted_at) VALUES (?, ?, ?, ?) ON CONFLICT(seedbox_id) DO UPDATE SET result = excluded.result, success_at = excluded.success_at, attempted_at = excluded.attempted_at, last_error = ''`, id, result, stamp, stamp); saveErr != nil {
+			http.Error(w, errMsgServerErr, http.StatusInternalServerError)
+			return
+		}
 		s.setFlash(w, r, "ok", stamp+": "+result)
 	}
 	http.Redirect(w, r, "/seedboxes/"+strconv.FormatInt(id, 10), http.StatusSeeOther)

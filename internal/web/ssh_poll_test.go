@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -155,6 +156,78 @@ func TestDirectoryPollKeepsResultWhenHostUnavailable(t *testing.T) {
 	result, err := collectSSHMetrics(t.Context(), box, poll)
 	if err != nil || !strings.Contains(result, "Top-level home entries: 1") || !strings.Contains(result, "Host metrics unavailable") || len(commands) != 2 {
 		t.Fatalf("partial result: %q %v commands=%d", result, err, len(commands))
+	}
+}
+
+func TestSSHObservationPersistsAcrossViewAndFailure(t *testing.T) {
+	_, db, srv := newTestServerFull(t)
+	id, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHDirectoryMetrics: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.sshPoll = func(context.Context, *model.Seedbox) (string, error) {
+		return "Top-level home entries: 2 (3 MB total)", nil
+	}
+	poll := func() {
+		req := httptest.NewRequest(http.MethodPost, "/seedboxes/1/poll", nil)
+		req.SetPathValue("id", "1")
+		w := httptest.NewRecorder()
+		srv.handleSeedboxPoll(w, req)
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("poll status %d", w.Code)
+		}
+	}
+	poll()
+	var result, successAt, attemptedAt string
+	var lastError string
+	read := func() {
+		t.Helper()
+		if err := db.QueryRow(`SELECT result, success_at, attempted_at, last_error FROM ssh_observations WHERE seedbox_id = ?`, id).Scan(&result, &successAt, &attemptedAt, &lastError); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read()
+	if result != "Top-level home entries: 2 (3 MB total)" || successAt == "" || attemptedAt == "" || lastError != "" {
+		t.Fatalf("saved observation: %q %q %q %q", result, successAt, attemptedAt, lastError)
+	}
+	srv.sshPoll = func(context.Context, *model.Seedbox) (string, error) { return "", errors.New("private remote error") }
+	poll()
+	read()
+	if result != "Top-level home entries: 2 (3 MB total)" || lastError == "" || strings.Contains(lastError, "private") {
+		t.Fatalf("failure replaced result or leaked error: %q %q", result, lastError)
+	}
+	if err := (&model.SeedboxStore{DB: db}).Delete(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM ssh_observations WHERE seedbox_id = ?`, id).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("orphaned observation: count=%d err=%v", count, err)
+	}
+}
+
+func TestSSHObservationDetailShowsLastResult(t *testing.T) {
+	ts, db, _ := newTestServerFull(t)
+	id, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHDirectoryMetrics: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO ssh_observations(seedbox_id, result, success_at, attempted_at, last_error) VALUES (?, ?, ?, ?, ?)`, id, "Top-level home entries: 2 (3 MB total)", "2026-10-18 22:00:00 UTC", "2026-10-18 23:00:00 UTC", "SSH observation unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	client := authedClient(t, ts)
+	resp, err := client.Get(ts.URL + "/seedboxes/" + strconv.FormatInt(id, 10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Top-level home entries: 2", "2026-10-18 22:00:00 UTC", "SSH observation unavailable"} {
+		if !bytes.Contains(body, []byte(want)) {
+			t.Fatalf("detail missing %q", want)
+		}
 	}
 }
 

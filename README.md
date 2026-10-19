@@ -190,10 +190,12 @@ Optional SSH polling** and press **Poll SSH metrics** on its detail page.
 Manual read-only polling fetches only the host load and memory metrics you
 select. A separate directory option measures top-level entries within the
 SSH account's home with low I/O priority and returns an aggregate count and
-size; it may take up to two minutes. No CPU utilization percentage is implied
-by the load average. It does not collect per-box I/O, qBittorrent, Docker or
-background polling yet. No background job, agent, or seedbox installation is
-involved.
+size; the whole manual poll has a two-minute deadline. The latest result,
+UTC attempt time and a generic failure state remain on the seedbox detail
+page after refresh; raw directory names are not retained. No CPU utilization
+percentage is implied by the load average. It does not collect per-box I/O,
+qBittorrent, Docker or background polling yet. No background job, agent, or
+seedbox installation is involved.
 
 The app's OS user needs a non-interactive, unencrypted SSH private key
 (standard `~/.ssh/id_*` files with private permissions) and a pre-verified
@@ -202,7 +204,7 @@ required; never trust a key obtained from an unverified network scan. The
 app stores only the opt-in and SSH username, never a password or private key.
 Disabled/inactive boxes are never polled. Host load/memory polling times out
 after 12 seconds; directory measurement has a two-minute limit. Failed polls
-never show raw SSH output or change inventory. If the
+report a generic error without showing SSH output or changing inventory. If the
 app runs as a systemd `DynamicUser`, provision its SSH identity and
 known_hosts via a private credential/home mechanism before enabling this
 option; the default service unit does not provide them. Do not enable it if

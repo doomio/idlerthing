@@ -142,6 +142,23 @@ func (s *Server) seedboxSection() *section {
 			if b.SSHPollEnabled {
 				sshStatus = "Enabled (manual)"
 			}
+			observation := infoCard{Title: "SSH observations", Pairs: []kvPair{{K: "Status", V: sshStatus}}}
+			if b.SSHPollEnabled {
+				var result, successAt, attemptedAt, lastError string
+				err := s.db.QueryRowContext(r.Context(), `SELECT result, success_at, attempted_at, last_error FROM ssh_observations WHERE seedbox_id = ?`, id).Scan(&result, &successAt, &attemptedAt, &lastError)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return nil, err
+				}
+				if successAt != "" {
+					observation.Pairs = append(observation.Pairs, kvPair{K: "Last successful poll (UTC)", V: successAt}, kvPair{K: "Last result", V: result})
+				}
+				if attemptedAt != "" {
+					observation.Pairs = append(observation.Pairs, kvPair{K: "Last attempt (UTC)", V: attemptedAt})
+				}
+				if lastError != "" {
+					observation.Pairs = append(observation.Pairs, kvPair{K: "Last error", V: lastError})
+				}
+			}
 			return &detailView{
 				Title:         title,
 				Mono:          true,
@@ -167,10 +184,7 @@ func (s *Server) seedboxSection() *section {
 						kvs("Owned since", b.OwnedSince),
 					}},
 					{Title: "Pricing", Pairs: pricingPairs(pricing), Empty: "No pricing attached."},
-					{Title: "SSH polling", Pairs: []kvPair{
-						{K: "Status", V: sshStatus},
-						{K: "SSH user", V: dash(b.SSHUser)},
-					}},
+					observation,
 				},
 			}, nil
 		},
