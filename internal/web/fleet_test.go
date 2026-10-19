@@ -137,6 +137,14 @@ func TestFleetUsagePresentation(t *testing.T) {
 	}
 }
 
+func TestFleetTrafficPeriodUsesCachedFeed(t *testing.T) {
+	svc := model.PMService{TrackedSince: "2026-10-01", CPUSince: "2026-10-02"}
+	box := buildFleetBox("box.example.net", "Example Hosting", svc, sql.NullInt64{}, "", 0)
+	if box.TrackedSince != "2026-10-01" || box.CPUSince != "2026-10-02" {
+		t.Fatalf("lost accounting periods: %+v", box)
+	}
+}
+
 func TestFleetUsesEditedInventoryQuota(t *testing.T) {
 	svc := model.PMService{DiskUsedBytes: 2 * 1024 * 1024 * 1024, DiskQuotaBytes: 8 * 1024 * 1024 * 1024}
 	box := buildFleetBox("box.example.net", "PulsedMedia", svc, sql.NullInt64{Int64: 4 * 1024, Valid: true}, "", 0)

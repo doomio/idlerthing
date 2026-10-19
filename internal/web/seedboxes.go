@@ -135,7 +135,7 @@ func (s *Server) seedboxSection() *section {
 			}
 			sid := strconv.FormatInt(b.ID, 10)
 			pollURL := ""
-			if b.SSHPollEnabled && b.Active {
+			if b.SSHPollEnabled && b.Active && (b.SSHHostMetrics || b.SSHMemoryMetrics) {
 				pollURL = routeSeedboxes + "/" + sid + "/poll"
 			}
 			sshStatus := "Off"
@@ -357,19 +357,24 @@ func (s *Server) handleSeedboxUpdate(w http.ResponseWriter, r *http.Request) {
 func parseSeedboxForm(r *http.Request) (*model.Seedbox, *model.Pricing, map[string]string) {
 	errs := map[string]string{}
 	b := &model.Seedbox{
-		Title:          nullStrFormValue(r, "title"),
-		Hostname:       strings.TrimSpace(r.FormValue("hostname")),
-		SeedBoxType:    nullStrFormValue(r, "seed_box_type"),
-		ProviderID:     nullIntFormValue(r, "provider_id"),
-		LocationID:     nullIntFormValue(r, "location_id"),
-		Active:         r.FormValue("active") != "",
-		ShowPublic:     r.FormValue("show_public") != "",
-		WasPromo:       r.FormValue("was_promo") != "",
-		SSHPollEnabled: r.FormValue("ssh_poll_enabled") != "",
-		SSHUser:        strings.TrimSpace(r.FormValue("ssh_user")),
+		Title:            nullStrFormValue(r, "title"),
+		Hostname:         strings.TrimSpace(r.FormValue("hostname")),
+		SeedBoxType:      nullStrFormValue(r, "seed_box_type"),
+		ProviderID:       nullIntFormValue(r, "provider_id"),
+		LocationID:       nullIntFormValue(r, "location_id"),
+		Active:           r.FormValue("active") != "",
+		ShowPublic:       r.FormValue("show_public") != "",
+		WasPromo:         r.FormValue("was_promo") != "",
+		SSHPollEnabled:   r.FormValue("ssh_poll_enabled") != "",
+		SSHUser:          strings.TrimSpace(r.FormValue("ssh_user")),
+		SSHHostMetrics:   r.FormValue("ssh_host_metrics") != "",
+		SSHMemoryMetrics: r.FormValue("ssh_memory_metrics") != "",
 	}
 	if b.Hostname == "" {
 		errs["hostname"] = "Hostname is required."
+	}
+	if (b.SSHHostMetrics || b.SSHMemoryMetrics) && !b.SSHPollEnabled {
+		errs["ssh_poll_enabled"] = "Enable SSH polling before selecting metrics."
 	}
 	if b.SSHPollEnabled && b.SSHUser == "" {
 		errs["ssh_user"] = "SSH username is required when polling is enabled."

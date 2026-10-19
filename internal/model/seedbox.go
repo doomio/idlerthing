@@ -45,23 +45,25 @@ type Seedbox struct {
 	// services. NULL when unlinked, or when it points at a service the feed
 	// no longer lists. Deliberately not a foreign key: the cache is replaced
 	// wholesale on every sync.
-	PMServiceID    sql.NullInt64
-	SSHPollEnabled bool
-	SSHUser        string
+	PMServiceID      sql.NullInt64
+	SSHPollEnabled   bool
+	SSHUser          string
+	SSHHostMetrics   bool
+	SSHMemoryMetrics bool
 }
 
 const seedboxColumns = `id, title, hostname, seed_box_type, provider_id, location_id,
 	port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo,
-	owned_since, created_at, updated_at, pm_service_id, ssh_poll_enabled, ssh_user`
+	owned_since, created_at, updated_at, pm_service_id, ssh_poll_enabled, ssh_user, ssh_host_metrics, ssh_memory_metrics`
 
 // scanSeedbox scans one seedboxColumns row into a Seedbox.
 func scanSeedbox(row interface{ Scan(...any) error }) (*Seedbox, error) {
 	var b Seedbox
-	var active, showPublic, wasPromo, pollEnabled int
+	var active, showPublic, wasPromo, pollEnabled, hostMetrics, memoryMetrics int
 	err := row.Scan(&b.ID, &b.Title, &b.Hostname, &b.SeedBoxType, &b.ProviderID,
 		&b.LocationID, &b.PortSpeed, &b.DiskAsMB, &b.BandwidthAsMB, &active,
 		&showPublic, &wasPromo, &b.OwnedSince, &b.CreatedAt, &b.UpdatedAt,
-		&b.PMServiceID, &pollEnabled, &b.SSHUser)
+		&b.PMServiceID, &pollEnabled, &b.SSHUser, &hostMetrics, &memoryMetrics)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +71,8 @@ func scanSeedbox(row interface{ Scan(...any) error }) (*Seedbox, error) {
 	b.ShowPublic = showPublic != 0
 	b.WasPromo = wasPromo != 0
 	b.SSHPollEnabled = pollEnabled != 0
+	b.SSHHostMetrics = hostMetrics != 0
+	b.SSHMemoryMetrics = memoryMetrics != 0
 	return &b, nil
 }
 
@@ -86,12 +90,12 @@ func (st *SeedboxStore) Create(ctx context.Context, b *Seedbox, pricing *Pricing
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO seedboxes (title, hostname, seed_box_type, provider_id, location_id,
 			port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo,
-			owned_since, pm_service_id, ssh_poll_enabled, ssh_user)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			owned_since, pm_service_id, ssh_poll_enabled, ssh_user, ssh_host_metrics, ssh_memory_metrics)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.Title, b.Hostname, b.SeedBoxType, b.ProviderID, b.LocationID,
 		b.PortSpeed, b.DiskAsMB, b.BandwidthAsMB, boolToInt(b.Active),
 		boolToInt(b.ShowPublic), boolToInt(b.WasPromo), b.OwnedSince, b.PMServiceID,
-		boolToInt(b.SSHPollEnabled), b.SSHUser)
+		boolToInt(b.SSHPollEnabled), b.SSHUser, boolToInt(b.SSHHostMetrics), boolToInt(b.SSHMemoryMetrics))
 	if err != nil {
 		return 0, fmt.Errorf("insert seedbox: %w", err)
 	}
@@ -131,12 +135,12 @@ func (st *SeedboxStore) Update(ctx context.Context, b *Seedbox, pricing *Pricing
 		UPDATE seedboxes SET title = ?, hostname = ?, seed_box_type = ?,
 			provider_id = ?, location_id = ?, port_speed = ?, disk_as_mb = ?,
 			bandwidth_as_mb = ?, active = ?, show_public = ?, was_promo = ?,
-			owned_since = ?, pm_service_id = ?, ssh_poll_enabled = ?, ssh_user = ?, updated_at = CURRENT_TIMESTAMP
+			owned_since = ?, pm_service_id = ?, ssh_poll_enabled = ?, ssh_user = ?, ssh_host_metrics = ?, ssh_memory_metrics = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`,
 		b.Title, b.Hostname, b.SeedBoxType, b.ProviderID, b.LocationID,
 		b.PortSpeed, b.DiskAsMB, b.BandwidthAsMB, boolToInt(b.Active),
 		boolToInt(b.ShowPublic), boolToInt(b.WasPromo), b.OwnedSince,
-		b.PMServiceID, boolToInt(b.SSHPollEnabled), b.SSHUser, b.ID)
+		b.PMServiceID, boolToInt(b.SSHPollEnabled), b.SSHUser, boolToInt(b.SSHHostMetrics), boolToInt(b.SSHMemoryMetrics), b.ID)
 	if err != nil {
 		return fmt.Errorf("update seedbox: %w", err)
 	}
@@ -223,7 +227,7 @@ func (st *SeedboxStore) List(ctx context.Context, opts ListOptions) ([]SeedboxLi
 	var out []SeedboxListItem
 	for rows.Next() {
 		var it SeedboxListItem
-		var active, showPublic, wasPromo, pollEnabled int
+		var active, showPublic, wasPromo, pollEnabled, hostMetrics, memoryMetrics int
 		var sshUser string
 		var currency sql.NullString
 		var price sql.NullFloat64
@@ -232,7 +236,7 @@ func (st *SeedboxStore) List(ctx context.Context, opts ListOptions) ([]SeedboxLi
 		err := rows.Scan(&it.ID, &it.Title, &it.Hostname, &it.SeedBoxType,
 			&it.ProviderID, &it.LocationID, &it.PortSpeed, &it.DiskAsMB,
 			&it.BandwidthAsMB, &active, &showPublic, &wasPromo, &it.OwnedSince,
-			&it.CreatedAt, &it.UpdatedAt, &it.PMServiceID, &pollEnabled, &sshUser,
+			&it.CreatedAt, &it.UpdatedAt, &it.PMServiceID, &pollEnabled, &sshUser, &hostMetrics, &memoryMetrics,
 			&it.ProviderName, &it.LocationName, &currency, &price, &term, &due)
 		if err != nil {
 			return nil, err
@@ -242,6 +246,8 @@ func (st *SeedboxStore) List(ctx context.Context, opts ListOptions) ([]SeedboxLi
 		it.WasPromo = wasPromo != 0
 		it.SSHPollEnabled = pollEnabled != 0
 		it.SSHUser = sshUser
+		it.SSHHostMetrics = hostMetrics != 0
+		it.SSHMemoryMetrics = memoryMetrics != 0
 		if currency.Valid {
 			it.Pricing = &Pricing{
 				ServiceID:   it.ID,

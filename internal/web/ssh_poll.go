@@ -20,7 +20,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/netip"
@@ -71,6 +73,39 @@ func dialPublicSSH(ctx context.Context, network, address string) (net.Conn, erro
 	}
 	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
 	return conn, err
+}
+
+func parseSSHHostSnapshot(raw string) (sshHostSnapshot, error) {
+	if len(raw) > 256 {
+		return sshHostSnapshot{}, errors.New("invalid host snapshot")
+	}
+	lines := strings.Split(strings.TrimSpace(raw), "\n")
+	if len(lines) < 3 {
+		return sshHostSnapshot{}, errors.New("invalid host snapshot")
+	}
+	fields := strings.Fields(lines[0])
+	if len(fields) < 3 {
+		return sshHostSnapshot{}, errors.New("invalid host snapshot")
+	}
+	for _, field := range fields[:3] {
+		v, err := strconv.ParseFloat(field, 64)
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1e6 {
+			return sshHostSnapshot{}, errors.New("invalid host load")
+		}
+	}
+	var total, available int64
+	if _, err := fmt.Sscanf(lines[1], "MemTotal: %d kB", &total); err != nil {
+		return sshHostSnapshot{}, errors.New("invalid host memory")
+	}
+	if _, err := fmt.Sscanf(lines[2], "MemAvailable: %d kB", &available); err != nil || total <= 0 || available < 0 || available > total || total > 1<<40 {
+		return sshHostSnapshot{}, errors.New("invalid host memory")
+	}
+	return sshHostSnapshot{Load: strings.Join(fields[:3], " / "), MemoryUsed: (total - available) * 1024, MemoryTotal: total * 1024}, nil
+}
+
+type sshHostSnapshot struct {
+	Load                    string
+	MemoryUsed, MemoryTotal int64
 }
 
 func validSSHTarget(host string) bool {
@@ -167,19 +202,24 @@ func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
 	var out strings.Builder
 	session.Stdout = &limitedWriter{writer: &out, remaining: 256}
 	session.Stderr = io.Discard
-	if err := session.Run("cat /proc/loadavg"); err != nil {
+	if err := session.Run("cat /proc/loadavg; grep -E '^(MemTotal|MemAvailable):' /proc/meminfo"); err != nil {
 		return "", err
 	}
-	fields := strings.Fields(out.String())
-	if len(fields) < 3 {
-		return "", errors.New("invalid load average response")
+	snap, err := parseSSHHostSnapshot(out.String())
+	if err != nil {
+		return "", err
 	}
-	for _, field := range fields[:3] {
-		if _, err := strconv.ParseFloat(field, 64); err != nil {
-			return "", errors.New("invalid load average response")
+	result := ""
+	if b.SSHHostMetrics {
+		result = "Host load (1 / 5 / 15 min): " + snap.Load
+	}
+	if b.SSHMemoryMetrics {
+		if result != "" {
+			result += "; "
 		}
+		result += "Host memory: " + fmtMB(snap.MemoryUsed/(1024*1024)) + " / " + fmtMB(snap.MemoryTotal/(1024*1024))
 	}
-	return strings.Join(fields[:3], " / "), nil
+	return result, nil
 }
 
 func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
@@ -201,11 +241,15 @@ func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "SSH polling disabled", http.StatusForbidden)
 		return
 	}
+	if !b.SSHHostMetrics && !b.SSHMemoryMetrics {
+		http.Error(w, "No SSH metrics selected", http.StatusForbidden)
+		return
+	}
 	result, err := s.sshPoll(r.Context(), b)
 	if err != nil {
 		s.setFlash(w, r, "err", "SSH poll failed; verify the app user's SSH access and known_hosts.")
 	} else {
-		s.setFlash(w, r, "ok", "Host load (1 / 5 / 15 min): "+result)
+		s.setFlash(w, r, "ok", result)
 	}
 	http.Redirect(w, r, "/seedboxes/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }
