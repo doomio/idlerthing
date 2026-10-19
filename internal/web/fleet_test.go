@@ -137,6 +137,22 @@ func TestFleetUsagePresentation(t *testing.T) {
 	}
 }
 
+func TestFleetTrophyMarker(t *testing.T) {
+	for _, tc := range []struct {
+		host, product string
+		want          bool
+	}{
+		{"box.example.net", "Trophy Seedbox", true},
+		{"TROPHY.example.net", "Standard", true},
+		{"box.example.net", "Standard", false},
+	} {
+		box := buildFleetBox(tc.host, "PulsedMedia", model.PMService{Product: tc.product}, sql.NullInt64{}, "", 0)
+		if box.Trophy != tc.want {
+			t.Errorf("host=%q product=%q trophy=%v, want %v", tc.host, tc.product, box.Trophy, tc.want)
+		}
+	}
+}
+
 func TestFleetTrafficPeriodUsesCachedFeed(t *testing.T) {
 	svc := model.PMService{TrackedSince: "2026-10-01", CPUSince: "2026-10-02"}
 	box := buildFleetBox("box.example.net", "Example Hosting", svc, sql.NullInt64{}, "", 0)

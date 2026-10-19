@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"idlerthing/internal/model"
@@ -39,6 +40,7 @@ const fleetStaleAfter = 6 * time.Hour
 type fleetBox struct {
 	Hostname  string
 	Product   string
+	Trophy    bool
 	Status    string
 	Cancelled bool
 
@@ -218,6 +220,7 @@ func buildFleetBox(hostname, providerName string, svc model.PMService, diskMB sq
 		Hostname:     hostname,
 		Provider:     providerName,
 		Product:      svc.Product,
+		Trophy:       strings.Contains(strings.ToLower(hostname+" "+svc.Product), "trophy"),
 		Status:       svc.Status,
 		Cancelled:    !pulsedmedia.IsActive(svc.Status),
 		DiskUsedMB:   svc.DiskUsedBytes / (1024 * 1024),

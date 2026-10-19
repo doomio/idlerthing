@@ -17,12 +17,15 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"idlerthing/internal/model"
 )
 
 // seedOneServer creates one server via the form and returns the client.
@@ -335,6 +338,35 @@ func TestDashboardDueSoonExcludesInactive(t *testing.T) {
 	}
 	if strings.Contains(dueSection, "inactive-due.example.com") {
 		t.Fatal("inactive service must not appear in due soon")
+	}
+}
+
+func TestDashboardShowsFleetSpendInTotal(t *testing.T) {
+	ts, database, srv := newTestServerFull(t)
+	client := authedClient(t, ts)
+	ratesSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"base":"USD","rates":{"EUR":0.5}}`)
+	}))
+	defer ratesSrv.Close()
+	srv.rates.BaseURL = ratesSrv.URL
+	_, err := database.Exec(`INSERT INTO seedboxes (hostname,active,pm_service_id) VALUES ('trophy.example.net',1,101)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.Exec(`INSERT INTO pricings (service_id,service_type,currency,price,term,active) VALUES ((SELECT id FROM seedboxes WHERE hostname='trophy.example.net'), ?, 'EUR', 10, 1, 1)`, model.ServiceSeedbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readBody(t, resp)
+	resp.Body.Close()
+	for _, want := range []string{"$20.00/mo", "Fleet cost", "$20.00/mo from 1 seedbox"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard missing %q", want)
+		}
 	}
 }
 

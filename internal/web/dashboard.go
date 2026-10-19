@@ -60,6 +60,8 @@ type dashboardView struct {
 	TotalServices    int
 	ActiveServices   int
 	MonthlyCost      string
+	FleetCost        string
+	FleetBoxes       int
 	YearlyCost       string
 	RatesNote        string
 	DueSoonCount     int
@@ -172,7 +174,7 @@ func (s *Server) computeDashboard(r *http.Request) (*dashboardView, error) {
 	settings := s.dashSettings(r)
 	view.DueSoonDays = settings.dueSoon
 	rates, ratesOK := s.rates.Get(ctx)
-	var monthlyUSD float64
+	var monthlyUSD, fleetUSD float64
 	var selects []string
 	for _, st := range model.OrderedServiceTypes {
 		selects = append(selects, fmt.Sprintf(
@@ -208,6 +210,35 @@ func (s *Server) computeDashboard(r *http.Request) (*dashboardView, error) {
 		if ok {
 			monthlyUSD += v
 		}
+	}
+	// Fleet spend uses the same durable pricing rows as the total above.
+	// Linked seedboxes are already included there; this is a breakdown, not an addend.
+	fleetRows, err := s.db.QueryContext(ctx, `SELECT p.currency, p.price, p.term FROM pricings p
+		JOIN seedboxes b ON b.id = p.service_id AND b.active = 1 AND b.pm_service_id IS NOT NULL
+		WHERE p.service_type = ? AND p.active = 1 AND p.term != ?`, model.ServiceSeedbox, model.TermOneTime)
+	if err != nil {
+		return nil, err
+	}
+	for fleetRows.Next() {
+		var pr priceRow
+		if err := fleetRows.Scan(&pr.currency, &pr.price, &pr.term); err != nil {
+			fleetRows.Close()
+			return nil, err
+		}
+		if v, ok := pricing.MonthlyUSDRaw(&model.Pricing{Currency: pr.currency, Price: pr.price, Term: pr.term}, rates); ok {
+			fleetUSD += v
+			view.FleetBoxes++
+		}
+	}
+	if err := fleetRows.Err(); err != nil {
+		fleetRows.Close()
+		return nil, err
+	}
+	fleetRows.Close()
+	if fleet, ok := pricing.ConvertUSD(fleetUSD, settings.currency, rates); ok && settings.currency != "USD" {
+		view.FleetCost = priceDisplay(settings.currency, fleet, model.TermMonthly)
+	} else {
+		view.FleetCost = fmt.Sprintf("$%.2f/mo", fleetUSD)
 	}
 	if !ratesOK {
 		view.RatesNote = "exchange rates unavailable — showing USD only"

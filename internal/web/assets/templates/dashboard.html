@@ -37,6 +37,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
   <div class="stat-card">
     <div class="stat-label">Monthly cost</div>
     <div class="stat-value mono">{{$v.MonthlyCost}}</div>
+    {{if $v.FleetBoxes}}<div class="stat-sub"><a href="/seedboxes/fleet">Fleet cost</a>: {{$v.FleetCost}} from {{$v.FleetBoxes}} {{if eq $v.FleetBoxes 1}}seedbox{{else}}seedboxes{{end}} · included above</div>{{end}}
   </div>
   <div class="stat-card">
     <div class="stat-label">Yearly cost</div>
