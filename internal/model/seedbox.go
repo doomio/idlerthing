@@ -46,6 +46,7 @@ type Seedbox struct {
 	// no longer lists. Deliberately not a foreign key: the cache is replaced
 	// wholesale on every sync.
 	PMServiceID         sql.NullInt64
+	PMManualOverride    bool
 	SSHPollEnabled      bool
 	SSHUser             string
 	SSHHostMetrics      bool
@@ -59,16 +60,16 @@ type Seedbox struct {
 
 const seedboxColumns = `id, title, hostname, seed_box_type, provider_id, location_id,
 	port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo,
-	owned_since, created_at, updated_at, pm_service_id, ssh_poll_enabled, ssh_user, ssh_host_metrics, ssh_memory_metrics, ssh_directory_metrics, ssh_quota_metrics, ssh_traffic_metrics, qbt_enabled, ssh_docker_metrics`
+	owned_since, created_at, updated_at, pm_service_id, ssh_poll_enabled, ssh_user, ssh_host_metrics, ssh_memory_metrics, ssh_directory_metrics, ssh_quota_metrics, ssh_traffic_metrics, qbt_enabled, ssh_docker_metrics, pm_manual_override`
 
 // scanSeedbox scans one seedboxColumns row into a Seedbox.
 func scanSeedbox(row interface{ Scan(...any) error }) (*Seedbox, error) {
 	var b Seedbox
-	var active, showPublic, wasPromo, pollEnabled, hostMetrics, memoryMetrics, directoryMetrics, quotaMetrics, trafficMetrics, qbtEnabled, dockerMetrics int
+	var active, showPublic, wasPromo, pollEnabled, hostMetrics, memoryMetrics, directoryMetrics, quotaMetrics, trafficMetrics, qbtEnabled, dockerMetrics, manualOverride int
 	err := row.Scan(&b.ID, &b.Title, &b.Hostname, &b.SeedBoxType, &b.ProviderID,
 		&b.LocationID, &b.PortSpeed, &b.DiskAsMB, &b.BandwidthAsMB, &active,
 		&showPublic, &wasPromo, &b.OwnedSince, &b.CreatedAt, &b.UpdatedAt,
-		&b.PMServiceID, &pollEnabled, &b.SSHUser, &hostMetrics, &memoryMetrics, &directoryMetrics, &quotaMetrics, &trafficMetrics, &qbtEnabled, &dockerMetrics)
+		&b.PMServiceID, &pollEnabled, &b.SSHUser, &hostMetrics, &memoryMetrics, &directoryMetrics, &quotaMetrics, &trafficMetrics, &qbtEnabled, &dockerMetrics, &manualOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +83,7 @@ func scanSeedbox(row interface{ Scan(...any) error }) (*Seedbox, error) {
 	b.SSHQuotaMetrics = quotaMetrics != 0
 	b.SSHTrafficMetrics = trafficMetrics != 0
 	b.QBTEnabled = qbtEnabled != 0
+	b.PMManualOverride = manualOverride != 0
 	b.SSHDockerMetrics = dockerMetrics != 0
 	return &b, nil
 }
@@ -100,12 +102,12 @@ func (st *SeedboxStore) Create(ctx context.Context, b *Seedbox, pricing *Pricing
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO seedboxes (title, hostname, seed_box_type, provider_id, location_id,
 			port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo,
-			owned_since, pm_service_id, ssh_poll_enabled, ssh_user, ssh_host_metrics, ssh_memory_metrics, ssh_directory_metrics, ssh_quota_metrics, ssh_traffic_metrics, qbt_enabled, ssh_docker_metrics)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			owned_since, pm_service_id, ssh_poll_enabled, ssh_user, ssh_host_metrics, ssh_memory_metrics, ssh_directory_metrics, ssh_quota_metrics, ssh_traffic_metrics, qbt_enabled, ssh_docker_metrics, pm_manual_override)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.Title, b.Hostname, b.SeedBoxType, b.ProviderID, b.LocationID,
 		b.PortSpeed, b.DiskAsMB, b.BandwidthAsMB, boolToInt(b.Active),
 		boolToInt(b.ShowPublic), boolToInt(b.WasPromo), b.OwnedSince, b.PMServiceID,
-		boolToInt(b.SSHPollEnabled), b.SSHUser, boolToInt(b.SSHHostMetrics), boolToInt(b.SSHMemoryMetrics), boolToInt(b.SSHDirectoryMetrics), boolToInt(b.SSHQuotaMetrics), boolToInt(b.SSHTrafficMetrics), boolToInt(b.QBTEnabled), boolToInt(b.SSHDockerMetrics))
+		boolToInt(b.SSHPollEnabled), b.SSHUser, boolToInt(b.SSHHostMetrics), boolToInt(b.SSHMemoryMetrics), boolToInt(b.SSHDirectoryMetrics), boolToInt(b.SSHQuotaMetrics), boolToInt(b.SSHTrafficMetrics), boolToInt(b.QBTEnabled), boolToInt(b.SSHDockerMetrics), boolToInt(b.PMManualOverride))
 	if err != nil {
 		return 0, fmt.Errorf("insert seedbox: %w", err)
 	}
@@ -145,12 +147,12 @@ func (st *SeedboxStore) Update(ctx context.Context, b *Seedbox, pricing *Pricing
 		UPDATE seedboxes SET title = ?, hostname = ?, seed_box_type = ?,
 			provider_id = ?, location_id = ?, port_speed = ?, disk_as_mb = ?,
 			bandwidth_as_mb = ?, active = ?, show_public = ?, was_promo = ?,
-			owned_since = ?, pm_service_id = ?, ssh_poll_enabled = ?, ssh_user = ?, ssh_host_metrics = ?, ssh_memory_metrics = ?, ssh_directory_metrics = ?, ssh_quota_metrics = ?, ssh_traffic_metrics = ?, qbt_enabled = ?, ssh_docker_metrics = ?, updated_at = CURRENT_TIMESTAMP
+			owned_since = ?, pm_service_id = ?, ssh_poll_enabled = ?, ssh_user = ?, ssh_host_metrics = ?, ssh_memory_metrics = ?, ssh_directory_metrics = ?, ssh_quota_metrics = ?, ssh_traffic_metrics = ?, qbt_enabled = ?, ssh_docker_metrics = ?, pm_manual_override = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`,
 		b.Title, b.Hostname, b.SeedBoxType, b.ProviderID, b.LocationID,
 		b.PortSpeed, b.DiskAsMB, b.BandwidthAsMB, boolToInt(b.Active),
 		boolToInt(b.ShowPublic), boolToInt(b.WasPromo), b.OwnedSince,
-		b.PMServiceID, boolToInt(b.SSHPollEnabled), b.SSHUser, boolToInt(b.SSHHostMetrics), boolToInt(b.SSHMemoryMetrics), boolToInt(b.SSHDirectoryMetrics), boolToInt(b.SSHQuotaMetrics), boolToInt(b.SSHTrafficMetrics), boolToInt(b.QBTEnabled), boolToInt(b.SSHDockerMetrics), b.ID)
+		b.PMServiceID, boolToInt(b.SSHPollEnabled), b.SSHUser, boolToInt(b.SSHHostMetrics), boolToInt(b.SSHMemoryMetrics), boolToInt(b.SSHDirectoryMetrics), boolToInt(b.SSHQuotaMetrics), boolToInt(b.SSHTrafficMetrics), boolToInt(b.QBTEnabled), boolToInt(b.SSHDockerMetrics), boolToInt(b.PMManualOverride), b.ID)
 	if err != nil {
 		return fmt.Errorf("update seedbox: %w", err)
 	}
@@ -242,7 +244,7 @@ func (st *SeedboxStore) List(ctx context.Context, opts ListOptions) ([]SeedboxLi
 	var out []SeedboxListItem
 	for rows.Next() {
 		var it SeedboxListItem
-		var active, showPublic, wasPromo, pollEnabled, hostMetrics, memoryMetrics, directoryMetrics, quotaMetrics, trafficMetrics, qbtEnabled, dockerMetrics int
+		var active, showPublic, wasPromo, pollEnabled, hostMetrics, memoryMetrics, directoryMetrics, quotaMetrics, trafficMetrics, qbtEnabled, dockerMetrics, manualOverride int
 		var sshUser string
 		var currency sql.NullString
 		var price sql.NullFloat64
@@ -251,7 +253,7 @@ func (st *SeedboxStore) List(ctx context.Context, opts ListOptions) ([]SeedboxLi
 		err := rows.Scan(&it.ID, &it.Title, &it.Hostname, &it.SeedBoxType,
 			&it.ProviderID, &it.LocationID, &it.PortSpeed, &it.DiskAsMB,
 			&it.BandwidthAsMB, &active, &showPublic, &wasPromo, &it.OwnedSince,
-			&it.CreatedAt, &it.UpdatedAt, &it.PMServiceID, &pollEnabled, &sshUser, &hostMetrics, &memoryMetrics, &directoryMetrics, &quotaMetrics, &trafficMetrics, &qbtEnabled, &dockerMetrics,
+			&it.CreatedAt, &it.UpdatedAt, &it.PMServiceID, &pollEnabled, &sshUser, &hostMetrics, &memoryMetrics, &directoryMetrics, &quotaMetrics, &trafficMetrics, &qbtEnabled, &dockerMetrics, &manualOverride,
 			&it.ProviderName, &it.LocationName, &currency, &price, &term, &due)
 		if err != nil {
 			return nil, err
@@ -267,6 +269,7 @@ func (st *SeedboxStore) List(ctx context.Context, opts ListOptions) ([]SeedboxLi
 		it.SSHQuotaMetrics = quotaMetrics != 0
 		it.SSHTrafficMetrics = trafficMetrics != 0
 		it.QBTEnabled = qbtEnabled != 0
+		it.PMManualOverride = manualOverride != 0
 		it.SSHDockerMetrics = dockerMetrics != 0
 		if currency.Valid {
 			it.Pricing = &Pricing{

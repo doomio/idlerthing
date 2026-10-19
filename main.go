@@ -308,6 +308,10 @@ func run() error {
 	webServer.SetLegal(License, ThirdPartyLicenses)
 	webServer.SetVersion(version)
 
+	pmSyncCtx, stopPMSync := context.WithCancel(context.Background())
+	defer stopPMSync()
+	go webServer.RunPMSync(pmSyncCtx, time.After)
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           webServer.Handler(),

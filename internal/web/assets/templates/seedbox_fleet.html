@@ -80,7 +80,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
   {{range $v.Boxes}}
   <article class="panel fleet-card{{if .Cancelled}} is-muted{{end}}">
     <div class="fleet-card-head">
-      <strong class="mono fleet-host">{{.Hostname}}</strong>
+      <strong class="mono fleet-host">{{if .Trophy}}<span class="fleet-trophy" role="img" aria-label="Trophy seedbox" title="Trophy seedbox">🏆</span> {{end}}{{.Hostname}}</strong>
       {{if .Cancelled}}
       <span class="badge badge-off">cancelled</span>
       {{else if .Status}}

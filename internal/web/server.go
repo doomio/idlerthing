@@ -307,6 +307,7 @@ func (s *Server) Handler() http.Handler {
 	// Settings.
 	mux.Handle("GET /settings", s.protect(http.HandlerFunc(s.handleSettingsGet)))
 	mux.Handle("POST /settings", s.protect(http.HandlerFunc(s.handleSettingsUpdate)))
+	mux.Handle("POST /settings/import", s.protect(http.HandlerFunc(s.handleSettingsImport)))
 	mux.Handle("POST /settings/account", s.protect(http.HandlerFunc(s.handleSettingsAccount)))
 	mux.Handle("POST /settings/prometheus/test", s.protect(http.HandlerFunc(s.handlePrometheusTest)))
 

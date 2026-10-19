@@ -139,7 +139,7 @@ func Import(ctx context.Context, db *sql.DB, r io.Reader, force bool) (*Summary,
 		}
 	}
 
-	imp := &importer{tx: conn, seenIPs: map[string]bool{}}
+	imp := &importer{tx: conn, seenIPs: map[string]bool{}, seenSeedboxes: map[string]bool{}}
 	if legacyFormat {
 		warnf(&imp.sum.Warnings, "%s", "backup predates the format marker — restoring as legacy format")
 	}
@@ -166,9 +166,10 @@ type importer struct {
 	catMisses int             // catalog refs the document couldn't resolve (partial export)
 	ipMaps    map[int64]int64 // old ip id → new ip id
 	// idMaps maps service_type → old id → new id.
-	idMaps  [7]map[int64]int64
-	catMaps map[string]map[int64]int64 // catalog kind → old id → new id
-	seenIPs map[string]bool
+	idMaps        [7]map[int64]int64
+	catMaps       map[string]map[int64]int64 // catalog kind → old id → new id
+	seenIPs       map[string]bool
+	seenSeedboxes map[string]bool
 }
 
 // run restores one decoded export document into imp.tx in dependency order:
@@ -985,14 +986,21 @@ func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 		if !imp.requireName(b, "hostname", "seedbox") {
 			continue
 		}
+		hostname := sget(b, "hostname")
+		key := strings.ToLower(hostname)
+		if imp.seenSeedboxes[key] {
+			warnf(&imp.sum.Warnings, "seedbox %q: duplicate hostname skipped", hostname)
+			continue
+		}
+		imp.seenSeedboxes[key] = true
 		sshUser := sget(b, "ssh_user")
 		// Imported inventory never grants network polling consent on this instance.
 		sshEnabled := false
 		res, err := imp.tx.ExecContext(ctx, `
 			INSERT INTO seedboxes (title, hostname, seed_box_type, provider_id, location_id,
 				port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo, owned_since,
-				pm_service_id, ssh_poll_enabled, ssh_user, ssh_host_metrics, ssh_memory_metrics, ssh_directory_metrics, ssh_quota_metrics, ssh_traffic_metrics, qbt_enabled, ssh_docker_metrics)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				pm_service_id, ssh_poll_enabled, ssh_user, ssh_host_metrics, ssh_memory_metrics, ssh_directory_metrics, ssh_quota_metrics, ssh_traffic_metrics, qbt_enabled, ssh_docker_metrics, pm_manual_override)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			sgetN(b, "title"), sget(b, "hostname"), sgetN(b, "seed_box_type"),
 			imp.remapCatalog("providers", nget(b, "provider_id")),
 			imp.remapCatalog("locations", nget(b, "location_id")),
@@ -1001,7 +1009,7 @@ func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 			imp.boundedInt(nget(b, "bandwidth_as_mb"), 1<<30, "bandwidth_as_mb", sget(b, "hostname")),
 			bint(bget(b, "active")), bint(bget(b, "show_public")),
 			bint(bget(b, "was_promo")), imp.normOwned(sgetN(b, "owned_since"), sget(b, "hostname")),
-			nget(b, "pm_service_id"), bint(sshEnabled), sshUser, bint(sshEnabled && bget(b, "ssh_host_metrics")), bint(sshEnabled && bget(b, "ssh_memory_metrics")), bint(sshEnabled && bget(b, "ssh_directory_metrics")), bint(sshEnabled && bget(b, "ssh_quota_metrics")), bint(sshEnabled && bget(b, "ssh_traffic_metrics")), bint(sshEnabled && bget(b, "qbt_enabled")), bint(sshEnabled && bget(b, "ssh_docker_metrics")))
+			nget(b, "pm_service_id"), bint(sshEnabled), sshUser, bint(sshEnabled && bget(b, "ssh_host_metrics")), bint(sshEnabled && bget(b, "ssh_memory_metrics")), bint(sshEnabled && bget(b, "ssh_directory_metrics")), bint(sshEnabled && bget(b, "ssh_quota_metrics")), bint(sshEnabled && bget(b, "ssh_traffic_metrics")), bint(sshEnabled && bget(b, "qbt_enabled")), bint(sshEnabled && bget(b, "ssh_docker_metrics")), bint(bget(b, "pm_manual_override")))
 		if err != nil {
 			return fmt.Errorf("import seedbox %q: %w", sget(b, "hostname"), err)
 		}

@@ -98,6 +98,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
         </select>
         <a class="field-hint" href="/catalogs/locations" target="_blank">+ New location</a>
       </label>
+      <label class="field"><span class="field-label"><input type="checkbox" name="pm_manual_override" value="on" {{if $b.PMManualOverride}}checked{{end}}> Manual override</span><span class="field-hint">Keep this seedbox's inventory and pricing untouched by PulsedMedia sync.</span></label>
       {{if or $v.FeedServices $v.StaleFeed}}
       {{/* Only offered when the provider holds an API key and has a cached
            feed. Selecting nothing unlinks; a link the feed no longer lists

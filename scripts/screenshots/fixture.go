@@ -54,7 +54,7 @@ func fixture() map[string]any {
 		},
 		"seedboxes": []any{
 			wrap("seedbox", seedbox(1, "dragon.example.net", 2, "Dragon-R", 2500, 10)),
-			wrap("seedbox", seedbox(2, "kvm.example.net", 2, "KVM", 1000, 5)),
+			wrap("seedbox", seedbox(2, "trophy.example.net", 2, "Trophy Seedbox", 1000, 5)),
 		},
 		"domains": []any{
 			wrap("domain", map[string]any{
@@ -115,7 +115,7 @@ func feedJSON() []byte {
 	}
 	body := `{"client_id":1000,"generated_at":"2026-10-18T09:00:00Z","currency":"EUR","services":[` +
 		svc(101, "Dragon-R", "dragon.example.net", "Quarterly", "2026-11-01", 44.97, "Active", 312) + "," +
-		svc(102, "KVM 2T", "kvm.example.net", "Monthly", "2026-10-25", 14.99, "Active", 47) + "," +
+		svc(102, "Trophy Seedbox", "trophy.example.net", "Monthly", "2026-10-25", 14.99, "Active", 47) + "," +
 		svc(103, "Storage 4T", "store.example.net", "Annually", "2027-01-15", 99.00, "Active", 5) + "," +
 		svc(104, "Retired Box", "retired.example.net", "Monthly", "", 9.99, "Cancelled", 0) +
 		`]}`
