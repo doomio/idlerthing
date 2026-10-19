@@ -23,8 +23,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"idlerthing/internal/importer"
 	"idlerthing/internal/model"
@@ -160,5 +163,50 @@ func TestSSHPollFormValidatesUsername(t *testing.T) {
 		if errs["ssh_user"] == "" {
 			t.Fatalf("accepted username %q", user)
 		}
+	}
+}
+
+func TestPollSeedboxLoadResponse(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".ssh", "known_hosts"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", dir)
+	t.Setenv("PATH", dir)
+	const response = "0.14 0.10 0.05 1/100 123\n"
+	for _, tt := range []struct {
+		name    string
+		script  string
+		want    string
+		wantErr string
+	}{
+		{name: "valid", script: "printf '%s' '" + response + "'", want: "0.14 / 0.10 / 0.05"},
+		{name: "at limit", script: "printf '%s' '" + response + strings.Repeat(" ", 1024-len(response)) + "'", want: "0.14 / 0.10 / 0.05"},
+		{name: "over limit", script: "printf '%s' '" + response + strings.Repeat(" ", 1025-len(response)) + "'", wantErr: "invalid load average response"},
+		{name: "continuous output", script: "while :; do printf '%s' '" + response + "'; done", wantErr: "invalid load average response"},
+		{name: "empty", script: "exit 0", wantErr: "invalid load average response"},
+		{name: "malformed", script: "printf 'bad 0.10 0.05'", wantErr: "invalid load average response"},
+		{name: "command failure", script: "exit 1", wantErr: "SSH poll failed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte("#!/bin/sh\n"+tt.script+"\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+			got, err := pollSeedboxLoad(ctx, &model.Seedbox{Hostname: "box.example.net", SSHUser: "demo"})
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) || got != "" {
+					t.Fatalf("got (%q, %v), want empty result and error containing %q", got, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("got (%q, %v), want (%q, nil)", got, err, tt.want)
+			}
+		})
 	}
 }
