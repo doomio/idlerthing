@@ -56,6 +56,13 @@ func main() {
 	defer os.RemoveAll(tmp)
 	// Debug hook: write the seed document and stop, so the fixture can be
 	// reviewed (or imported by hand) without launching a browser.
+	if dump := os.Getenv("DUMP_FEED"); dump != "" {
+		if err := os.WriteFile(dump, feedJSON(), 0o600); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("wrote feed to", dump)
+		return
+	}
 	if dump := os.Getenv("DUMP_FIXTURE"); dump != "" {
 		doc, err := json.MarshalIndent(fixture(), "", "  ")
 		if err != nil {

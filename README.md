@@ -32,12 +32,12 @@ benchmarks. SQLite storage, no cgo, no external services required.
 
 These screenshots use invented data from the [screenshot harness](scripts/screenshots/README.md); no live account or host is shown.
 
-![PulsedMedia fleet view with storage, traffic, CPU and torrent usage](docs/screenshots/fleet.png)
+![PulsedMedia fleet view with synthetic trophy seedbox, storage, traffic, CPU and torrent usage](docs/screenshots/fleet.png)
+
+![Dashboard with synthetic inventory and fleet-cost breakdown](docs/screenshots/dashboard.png)
 
 <details>
 <summary>More screenshots</summary>
-
-![Dashboard with sample inventory](docs/screenshots/dashboard.png)
 
 ![Seedbox inventory with sample entries](docs/screenshots/seedboxes.png)
 
