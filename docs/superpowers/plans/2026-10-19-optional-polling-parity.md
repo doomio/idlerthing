@@ -1,6 +1,6 @@
 # Optional polling parity — execution plan
 
-Status: in progress. Spec: owner's request in this conversation to bring pmss-fleet-manager's optional polling into idlerthing. Baseline: main at 6535875. Scope is broad; never claim parity until each task is verified. Existing manual SSH load polling is the secure, default-off seam.
+Status: partial, not full parity. Spec: owner's request in this conversation to bring pmss-fleet-manager's optional polling into idlerthing. Baseline: main at 6535875. Scope is broad; never claim parity until each task is verified. Existing manual SSH load polling is the secure, default-off seam.
 
 ## Constraints
 - No production hostnames, accounts, credentials, keys, screenshots of real boxes or private topology in the public repo.
@@ -18,7 +18,7 @@ Status: in progress. Spec: owner's request in this conversation to bring pmss-fl
 - Prefer provider API where equivalent. Do not claim per-box disk I/O from one cumulative /proc/diskstats read; sample or label the interval.
 
 ## Task 3: qBittorrent observations
-- Explicit per-box checkbox, private WebUI credentials or existing SSH tunnel (never browser exposure), bounded polling and authenticated read-only requests. Test auth failures, disabled behavior and session expiry; no mutating endpoints in this task.
+- Requires a read-only WebUI probe tunneled through the verified SSH client, with a bounded response, authentication guard, and explicit per-box consent. Do not add a checkbox without its collector. Test that an opted-out box never opens the tunnel and that auth failures do not trigger repeated login attempts. Requires separate design for handling WebUI credentials; no mutating endpoints.
 
 ## Task 4: Container and directory observations
 - Separate opt-ins and bounded low-priority probes, with strict home scope; no implicit Docker control or unbounded `du`. Test timeouts and concurrent edits.

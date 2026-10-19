@@ -180,13 +180,15 @@ stored in the SQLite database; protect the DB, its WAL/SHM files and any raw
 backups as secrets (the app sets DB/WAL/SHM permissions to 0600). Application
 JSON/CSV exports do not include the key; restore it separately if needed.
 
-## Optional SSH load polling
+## Optional SSH metrics polling
 
 Seedboxes remain passive unless you opt a box in under **Edit seedbox →
-Optional SSH polling** and press **Poll SSH load** on its detail page. This
-first read-only poll fetches `/proc/loadavg` over SSH and shows 1/5/15-minute
-host load; it does not collect CPU/RAM, I/O, qBittorrent or Docker yet. No
-background job, agent, or seedbox installation is involved.
+Optional SSH polling** and press **Poll SSH metrics** on its detail page. This
+first read-only poll fetches `/proc/loadavg` and `/proc/meminfo` over SSH. You
+can independently select host load or host memory on each seedbox; no CPU
+utilization percentage is implied by the load average. It does not collect
+per-box I/O, qBittorrent, Docker or background polling yet. No background
+job, agent, or seedbox installation is involved.
 
 The app's OS user needs a non-interactive, unencrypted SSH private key
 (standard `~/.ssh/id_*` files with private permissions) and a pre-verified
