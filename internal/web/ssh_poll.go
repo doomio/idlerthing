@@ -19,7 +19,6 @@ package web
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -107,19 +106,6 @@ func parseSSHHostSnapshot(raw string) (sshHostSnapshot, error) {
 type sshHostSnapshot struct {
 	Load                    string
 	MemoryUsed, MemoryTotal int64
-}
-
-func parseQBTMainData(raw []byte) (int, error) {
-	if len(raw) > 1<<20 {
-		return 0, errors.New("qBittorrent response too large")
-	}
-	var payload struct {
-		Torrents map[string]json.RawMessage `json:"torrents"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return 0, err
-	}
-	return len(payload.Torrents), nil
 }
 
 func validSSHTarget(host string) bool {
@@ -255,7 +241,7 @@ func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "SSH polling disabled", http.StatusForbidden)
 		return
 	}
-	if !b.SSHHostMetrics && !b.SSHMemoryMetrics && !b.SSHQBTMetrics {
+	if !b.SSHHostMetrics && !b.SSHMemoryMetrics {
 		http.Error(w, "No SSH metrics selected", http.StatusForbidden)
 		return
 	}

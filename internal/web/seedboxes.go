@@ -135,7 +135,7 @@ func (s *Server) seedboxSection() *section {
 			}
 			sid := strconv.FormatInt(b.ID, 10)
 			pollURL := ""
-			if b.SSHPollEnabled && b.Active && (b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHQBTMetrics) {
+			if b.SSHPollEnabled && b.Active && (b.SSHHostMetrics || b.SSHMemoryMetrics) {
 				pollURL = routeSeedboxes + "/" + sid + "/poll"
 			}
 			sshStatus := "Off"
@@ -366,12 +366,11 @@ func parseSeedboxForm(r *http.Request) (*model.Seedbox, *model.Pricing, map[stri
 		SSHUser:          strings.TrimSpace(r.FormValue("ssh_user")),
 		SSHHostMetrics:   r.FormValue("ssh_host_metrics") != "",
 		SSHMemoryMetrics: r.FormValue("ssh_memory_metrics") != "",
-		SSHQBTMetrics:    r.FormValue("ssh_qbt_metrics") != "",
 	}
 	if b.Hostname == "" {
 		errs["hostname"] = "Hostname is required."
 	}
-	if (b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHQBTMetrics) && !b.SSHPollEnabled {
+	if (b.SSHHostMetrics || b.SSHMemoryMetrics) && !b.SSHPollEnabled {
 		errs["ssh_poll_enabled"] = "Enable SSH polling before selecting metrics."
 	}
 	if b.SSHPollEnabled && b.SSHUser == "" {
