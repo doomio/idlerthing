@@ -430,8 +430,7 @@ func TestCatchUpAnchored(t *testing.T) {
 	}
 }
 
-// An explicit due-date write re-derives due_day; the rollover never touches
-// it.
+// New due dates derive due_day; unchanged dates preserve an existing anchor.
 func TestUpsertDerivesDueAnchor(t *testing.T) {
 	database := testDB(t)
 	ctx := context.Background()
@@ -464,6 +463,47 @@ func TestUpsertDerivesDueAnchor(t *testing.T) {
 	}
 	if day.Valid {
 		t.Fatalf("NULL due must not fabricate an anchor: %v", day)
+	}
+}
+
+func TestUpsertPreservesUnchangedDueAnchor(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		anchor sql.NullInt64
+		due    sql.NullString
+		want   sql.NullInt64
+	}{
+		{"unchanged", sql.NullInt64{Int64: 31, Valid: true}, sql.NullString{String: "2027-02-28", Valid: true}, sql.NullInt64{Int64: 31, Valid: true}},
+		{"missing anchor", sql.NullInt64{}, sql.NullString{String: "2027-02-28", Valid: true}, sql.NullInt64{Int64: 28, Valid: true}},
+		{"changed date", sql.NullInt64{Int64: 31, Valid: true}, sql.NullString{String: "2027-03-15", Valid: true}, sql.NullInt64{Int64: 15, Valid: true}},
+		{"cleared date", sql.NullInt64{Int64: 31, Valid: true}, sql.NullString{}, sql.NullInt64{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database := testDB(t)
+			ctx := context.Background()
+			tx, err := database.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if _, err := tx.ExecContext(ctx, `INSERT INTO pricings
+				(service_id, service_type, currency, price, term, next_due_date, due_day)
+				VALUES (1, 1, 'USD', 10, 1, '2027-02-28', ?)`, tc.anchor); err != nil {
+				t.Fatal(err)
+			}
+			if err := model.UpsertPricingTx(ctx, tx, model.ServiceServer, 1, &model.Pricing{
+				Currency: "EUR", Price: 12, Term: model.TermMonthly, NextDueDate: tc.due,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var got sql.NullInt64
+			if err := tx.QueryRowContext(ctx, "SELECT due_day FROM pricings WHERE service_id = 1 AND service_type = 1").Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("anchor = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
 

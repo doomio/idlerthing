@@ -254,6 +254,8 @@ func TestSyncAdoptsFeedDueAfterDashboardAdvance(t *testing.T) {
 	provider := seedProviderKey(t, database, "k")
 	box := seedLinkedSeedbox(t, database, provider, 101, "box1.example.net")
 	putCache(t, database, provider, prevService(provider, 101, "Monthly", "2026-01-01", 10, 0))
+	otherProvider := seedProviderKey(t, database, "other")
+	putCache(t, database, otherProvider, prevService(otherProvider, 101, "Monthly", "2026-01-01", 10, 0))
 	if _, err := database.Exec(`INSERT INTO pricings (service_id, service_type, currency, price, term, next_due_date)
 		VALUES (?, ?, 'EUR', 10, 1, '2026-01-01')`, box, model.ServiceSeedbox); err != nil {
 		t.Fatal(err)
@@ -274,6 +276,13 @@ func TestSyncAdoptsFeedDueAfterDashboardAdvance(t *testing.T) {
 	if baseline != advanced {
 		t.Fatalf("rollover must move the merge baseline: cache=%q pricing=%q", baseline, advanced)
 	}
+	if err := database.QueryRow("SELECT next_due FROM pm_services WHERE provider_id = ? AND service_id = 101",
+		otherProvider).Scan(&baseline); err != nil {
+		t.Fatal(err)
+	}
+	if baseline != "2026-01-01" {
+		t.Fatalf("rollover changed another provider's baseline: %q", baseline)
+	}
 
 	srv := mockFeed(t, feedJSON(svcJSON(101, "Monthly", `"10"`, "2099-01-01", 0)))
 	if _, err := Sync(context.Background(), database, provider, "k", srv.URL, time.Now()); err != nil {
@@ -281,6 +290,47 @@ func TestSyncAdoptsFeedDueAfterDashboardAdvance(t *testing.T) {
 	}
 	if _, _, _, due, _ := readPricing(t, database, box); due != "2099-01-01" {
 		t.Fatalf("feed due date frozen by the dashboard rollover: got %q, want 2099-01-01", due)
+	}
+}
+
+func TestSyncKeepsHumanDueAnchorAfterDashboardAdvance(t *testing.T) {
+	database := syncDB(t)
+	ctx := context.Background()
+	provider := seedProviderKey(t, database, "k")
+	box := seedLinkedSeedbox(t, database, provider, 101, "box1.example.net")
+	putCache(t, database, provider, prevService(provider, 101, "Monthly", "2000-01-01", 10, 0))
+	// The user's 31st anchor has already been clamped by a February rollover.
+	if _, err := database.Exec(`INSERT INTO pricings
+		(service_id, service_type, currency, price, term, next_due_date, due_day)
+		VALUES (?, ?, 'EUR', 10, 1, '2000-02-29', 31)`, box, model.ServiceSeedbox); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := pricing.AdvanceDueDates(ctx, database); err != nil || n != 1 {
+		t.Fatalf("advance: n=%d err=%v", n, err)
+	}
+	_, _, _, advanced, _ := readPricing(t, database, box)
+	var baseline string
+	if err := database.QueryRow("SELECT next_due FROM pm_services WHERE provider_id = ? AND service_id = 101",
+		provider).Scan(&baseline); err != nil {
+		t.Fatal(err)
+	}
+	if baseline != "2000-01-01" {
+		t.Fatalf("user-edited pricing must leave the feed baseline alone: %q", baseline)
+	}
+	srv := mockFeed(t, feedJSON(svcJSON(101, "Monthly", `"10"`, "2099-01-01", 0)))
+	if _, err := Sync(ctx, database, provider, "k", srv.URL, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, due, _ := readPricing(t, database, box); due != advanced {
+		t.Fatalf("sync replaced the user's advanced due date: got %q, want %q", due, advanced)
+	}
+	var day int
+	if err := database.QueryRow("SELECT due_day FROM pricings WHERE service_id = ? AND service_type = ?",
+		box, model.ServiceSeedbox).Scan(&day); err != nil {
+		t.Fatal(err)
+	}
+	if day != 31 {
+		t.Fatalf("sync lost the user's month-end anchor: got %d, want 31", day)
 	}
 }
 
@@ -461,6 +511,36 @@ func TestSyncQuotaZeroWritesNoDisk(t *testing.T) {
 	disk, _ := readDisk(t, database, box)
 	if disk != 500 {
 		t.Fatalf("a zero quota must write nothing, got %d", disk)
+	}
+}
+
+func TestSyncQuotaPresence(t *testing.T) {
+	const quota = int64(1) << 40
+	for _, tc := range []struct {
+		name, seedbox string
+		want          int64
+	}{
+		{"missing seedbox", "", quota},
+		{"missing usage", `,"seedbox":{}`, quota},
+		{"explicit zero", `,"seedbox":{"usage":{"disk_quota_bytes":0}}`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database := syncDB(t)
+			provider := seedProviderKey(t, database, "k")
+			putCache(t, database, provider, prevService(provider, 101, "Monthly", "", 10, quota))
+			srv := mockFeed(t, feedJSON(`{"id":101,"status":"Active","billing_cycle":"Monthly","recurring_amount":10`+tc.seedbox+`}`))
+			if _, err := Sync(context.Background(), database, provider, "k", srv.URL, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			var got int64
+			if err := database.QueryRow("SELECT disk_quota_bytes FROM pm_services WHERE provider_id = ? AND service_id = 101",
+				provider).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("cached quota = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
 

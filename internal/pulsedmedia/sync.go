@@ -81,7 +81,7 @@ func Sync(ctx context.Context, db *sql.DB, providerID int64, key, url string, no
 	cached := make([]model.PMService, 0, len(feed.Services))
 	for _, s := range feed.Services {
 		quota := usageField(s, func(u *Usage) int64 { return u.DiskQuotaBytes })
-		if quota <= 0 {
+		if s.Seedbox == nil || s.Seedbox.Usage == nil {
 			// A feed that dropped the usage block reports "no quota", not
 			// "quota zero". Carrying the last reported value forward keeps
 			// the merge baseline intact: a cache row of 0 would make the

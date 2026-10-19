@@ -30,10 +30,9 @@ import (
 // arithmetic aims at the row's stored day-of-month anchor (due_day) and is
 // clamped to short months, so a February rollover of a Jan-31 billing does
 // not re-anchor March to the 28th. When the advanced row is a seedbox linked
-// to a provider feed, the new date is written back into the feed cache as
-// our baseline — otherwise the next sync would read the rollover as a human
-// edit and freeze the provider's due-date updates forever. Returns the
-// number of rows updated.
+// to a provider feed whose cached baseline matches the old due date, the new
+// date becomes that baseline. This keeps provider corrections working while
+// preserving human edits. Returns the number of rows updated.
 func AdvanceDueDates(ctx context.Context, db *sql.DB) (int, error) {
 	today := time.Now().Format(time.DateOnly)
 
@@ -108,7 +107,7 @@ func AdvanceDueDates(ctx context.Context, db *sql.DB) (int, error) {
 			continue // changed concurrently — leave it alone
 		}
 		if dr.serviceType == model.ServiceSeedbox {
-			if err := model.BumpFeedDueBaselineTx(ctx, tx, dr.serviceID, next); err != nil {
+			if err := model.BumpFeedDueBaselineTx(ctx, tx, dr.serviceID, dr.due, next); err != nil {
 				return updated, err
 			}
 		}

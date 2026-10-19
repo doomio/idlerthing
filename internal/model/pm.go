@@ -220,13 +220,15 @@ func LinkSeedboxTx(ctx context.Context, tx *sql.Tx, seedboxID, serviceID int64) 
 // own writes apart from human edits by comparing the inventory against that
 // cached value; without this write-back the dashboard's lazy rollover would
 // look like a human edit on the next sync and freeze the provider's
-// due-date updates forever. A no-op when the seedbox has no feed link.
-func BumpFeedDueBaselineTx(ctx context.Context, tx *sql.Tx, seedboxID int64, nextDue string) error {
+// due-date updates forever. Only advances a baseline matching oldDue, so a
+// human-edited due date stays distinct. A no-op without a complete feed link.
+func BumpFeedDueBaselineTx(ctx context.Context, tx *sql.Tx, seedboxID int64, oldDue, nextDue string) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE pm_services SET next_due = ?
-		WHERE service_id = (SELECT pm_service_id FROM seedboxes
-			WHERE id = ? AND pm_service_id IS NOT NULL)`,
-		nextDue, seedboxID)
+		WHERE next_due = ? AND (provider_id, service_id) IN (
+			SELECT provider_id, pm_service_id FROM seedboxes
+			WHERE id = ? AND pm_service_id IS NOT NULL AND provider_id IS NOT NULL)`,
+		nextDue, oldDue, seedboxID)
 	if err != nil {
 		return fmt.Errorf("bump feed due baseline: %w", err)
 	}

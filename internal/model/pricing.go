@@ -215,8 +215,9 @@ func upsertPricingTx(ctx context.Context, tx *sql.Tx, serviceType int, serviceID
 	if p.Term < TermMonthly || p.Term > TermOneTime {
 		return fmt.Errorf("invalid pricing term %d", p.Term)
 	}
-	// An explicit due-date write re-derives the month-end anchor (see
-	// migration 0017); only the lazy rollover avoids touching it.
+	// Derive the month-end anchor for new or changed dates (migration 0017).
+	// The upsert preserves an existing anchor when the date is unchanged:
+	// saving a clamped February date must keep the original billing day.
 	var dueDay sql.NullInt64
 	if p.NextDueDate.Valid {
 		if t, err := time.Parse(time.DateOnly, p.NextDueDate.String); err == nil {
@@ -231,7 +232,9 @@ func upsertPricingTx(ctx context.Context, tx *sql.Tx, serviceType int, serviceID
 			price = excluded.price,
 			term = excluded.term,
 			next_due_date = excluded.next_due_date,
-			due_day = excluded.due_day,
+			due_day = CASE
+				WHEN pricings.next_due_date IS excluded.next_due_date AND pricings.due_day IS NOT NULL
+				THEN pricings.due_day ELSE excluded.due_day END,
 			active = 1,
 			updated_at = CURRENT_TIMESTAMP`,
 		p.ServiceID, p.ServiceType, p.Currency, p.Price, p.Term, p.NextDueDate, dueDay)
