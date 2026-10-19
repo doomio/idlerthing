@@ -161,6 +161,9 @@ func TestOptionalSSHPollEnabledUsesPinnedHost(t *testing.T) {
 	if w.Code != http.StatusSeeOther || !called {
 		t.Fatalf("enabled poll: %d called=%v", w.Code, called)
 	}
+	if !strings.Contains(w.Header().Get("Set-Cookie"), "UTC") {
+		t.Fatalf("successful poll has no UTC attempt timestamp: %q", w.Header().Get("Set-Cookie"))
+	}
 }
 
 func TestSSHPollRouteRequiresCSRF(t *testing.T) {

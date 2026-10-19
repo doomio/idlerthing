@@ -284,10 +284,11 @@ func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.sshPoll(r.Context(), b)
+	stamp := time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
 	if err != nil {
-		s.setFlash(w, r, "err", "SSH poll failed; verify the app user's SSH access and known_hosts.")
+		s.setFlash(w, r, "err", "SSH poll failed at "+stamp+"; check SSH access, known_hosts and selected metric availability.")
 	} else {
-		s.setFlash(w, r, "ok", result)
+		s.setFlash(w, r, "ok", stamp+": "+result)
 	}
 	http.Redirect(w, r, "/seedboxes/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }
