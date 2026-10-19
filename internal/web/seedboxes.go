@@ -135,12 +135,29 @@ func (s *Server) seedboxSection() *section {
 			}
 			sid := strconv.FormatInt(b.ID, 10)
 			pollURL := ""
-			if b.SSHPollEnabled && b.Active && (b.SSHHostMetrics || b.SSHMemoryMetrics) {
+			if b.SSHPollEnabled && b.Active && (b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics) {
 				pollURL = routeSeedboxes + "/" + sid + "/poll"
 			}
 			sshStatus := "Off"
 			if b.SSHPollEnabled {
 				sshStatus = "Enabled (manual)"
+			}
+			observation := infoCard{Title: "SSH observations", Pairs: []kvPair{{K: "Status", V: sshStatus}}}
+			if b.SSHPollEnabled {
+				var result, successAt, attemptedAt, lastError string
+				err := s.db.QueryRowContext(r.Context(), `SELECT result, success_at, attempted_at, last_error FROM ssh_observations WHERE seedbox_id = ?`, id).Scan(&result, &successAt, &attemptedAt, &lastError)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return nil, err
+				}
+				if successAt != "" {
+					observation.Pairs = append(observation.Pairs, kvPair{K: "Last successful poll (UTC)", V: successAt}, kvPair{K: "Last result", V: result})
+				}
+				if attemptedAt != "" {
+					observation.Pairs = append(observation.Pairs, kvPair{K: "Last attempt (UTC)", V: attemptedAt})
+				}
+				if lastError != "" {
+					observation.Pairs = append(observation.Pairs, kvPair{K: "Last error", V: lastError})
+				}
 			}
 			return &detailView{
 				Title:         title,
@@ -167,10 +184,7 @@ func (s *Server) seedboxSection() *section {
 						kvs("Owned since", b.OwnedSince),
 					}},
 					{Title: "Pricing", Pairs: pricingPairs(pricing), Empty: "No pricing attached."},
-					{Title: "SSH polling", Pairs: []kvPair{
-						{K: "Status", V: sshStatus},
-						{K: "SSH user", V: dash(b.SSHUser)},
-					}},
+					observation,
 				},
 			}, nil
 		},
@@ -357,23 +371,24 @@ func (s *Server) handleSeedboxUpdate(w http.ResponseWriter, r *http.Request) {
 func parseSeedboxForm(r *http.Request) (*model.Seedbox, *model.Pricing, map[string]string) {
 	errs := map[string]string{}
 	b := &model.Seedbox{
-		Title:            nullStrFormValue(r, "title"),
-		Hostname:         strings.TrimSpace(r.FormValue("hostname")),
-		SeedBoxType:      nullStrFormValue(r, "seed_box_type"),
-		ProviderID:       nullIntFormValue(r, "provider_id"),
-		LocationID:       nullIntFormValue(r, "location_id"),
-		Active:           r.FormValue("active") != "",
-		ShowPublic:       r.FormValue("show_public") != "",
-		WasPromo:         r.FormValue("was_promo") != "",
-		SSHPollEnabled:   r.FormValue("ssh_poll_enabled") != "",
-		SSHUser:          strings.TrimSpace(r.FormValue("ssh_user")),
-		SSHHostMetrics:   r.FormValue("ssh_host_metrics") != "",
-		SSHMemoryMetrics: r.FormValue("ssh_memory_metrics") != "",
+		Title:               nullStrFormValue(r, "title"),
+		Hostname:            strings.TrimSpace(r.FormValue("hostname")),
+		SeedBoxType:         nullStrFormValue(r, "seed_box_type"),
+		ProviderID:          nullIntFormValue(r, "provider_id"),
+		LocationID:          nullIntFormValue(r, "location_id"),
+		Active:              r.FormValue("active") != "",
+		ShowPublic:          r.FormValue("show_public") != "",
+		WasPromo:            r.FormValue("was_promo") != "",
+		SSHPollEnabled:      r.FormValue("ssh_poll_enabled") != "",
+		SSHUser:             strings.TrimSpace(r.FormValue("ssh_user")),
+		SSHHostMetrics:      r.FormValue("ssh_host_metrics") != "",
+		SSHMemoryMetrics:    r.FormValue("ssh_memory_metrics") != "",
+		SSHDirectoryMetrics: r.FormValue("ssh_directory_metrics") != "",
 	}
 	if b.Hostname == "" {
 		errs["hostname"] = "Hostname is required."
 	}
-	if (b.SSHHostMetrics || b.SSHMemoryMetrics) && !b.SSHPollEnabled {
+	if (b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics) && !b.SSHPollEnabled {
 		errs["ssh_poll_enabled"] = "Enable SSH polling before selecting metrics."
 	}
 	if b.SSHPollEnabled && b.SSHUser == "" {
