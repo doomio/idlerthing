@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/netip"
 	"os"
@@ -34,6 +35,7 @@ import (
 )
 
 const sshPollTimeout = 12 * time.Second
+const sshPollMaxOutput = 1024
 
 func validSSHTarget(host string) bool {
 	if host == "" || strings.EqualFold(host, "localhost") || strings.HasSuffix(strings.ToLower(host), ".localhost") || strings.HasSuffix(strings.ToLower(host), ".local") {
@@ -79,9 +81,28 @@ func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
 	cmd := exec.CommandContext(ctx, "ssh", "-F", "/dev/null", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile="+knownHosts,
 		"-o", "GlobalKnownHostsFile=/dev/null", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=5", "-o", "ConnectionAttempts=1",
 		"-o", "ProxyCommand=none", "-o", "ProxyJump=none", "-o", "PermitLocalCommand=no", "-o", "ClearAllForwardings=yes", "-o", "LogLevel=ERROR", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "IdentityAgent=none", "-p", "22", "--", b.SSHUser+"@"+b.Hostname, "cat /proc/loadavg")
-	out, err := cmd.Output()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("SSH poll failed: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("SSH poll failed: %w", err)
+	}
+	// Read one extra byte to detect oversized responses without buffering the
+	// rest. Stop and reap the SSH process if it exceeds the limit or reading fails.
+	out, readErr := io.ReadAll(io.LimitReader(stdout, sshPollMaxOutput+1))
+	if readErr != nil || len(out) > sshPollMaxOutput {
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	if len(out) > sshPollMaxOutput {
+		return "", errors.New("invalid load average response")
+	}
+	if readErr != nil {
+		return "", fmt.Errorf("SSH poll failed: %w", readErr)
+	}
+	if waitErr != nil {
+		return "", fmt.Errorf("SSH poll failed: %w", waitErr)
 	}
 	fields := strings.Fields(string(out))
 	if len(fields) < 3 {

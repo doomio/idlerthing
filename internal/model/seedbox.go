@@ -240,6 +240,8 @@ func (st *SeedboxStore) List(ctx context.Context, opts ListOptions) ([]SeedboxLi
 		it.Active = active != 0
 		it.ShowPublic = showPublic != 0
 		it.WasPromo = wasPromo != 0
+		it.SSHPollEnabled = pollEnabled != 0
+		it.SSHUser = sshUser
 		if currency.Valid {
 			it.Pricing = &Pricing{
 				ServiceID:   it.ID,
