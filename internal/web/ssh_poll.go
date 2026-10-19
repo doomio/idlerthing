@@ -53,6 +53,37 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+func sshDirectoryCommand(b *model.Seedbox) string {
+	if !b.SSHDirectoryMetrics {
+		return ""
+	}
+	return `LC_ALL=C; export LC_ALL; cd "$HOME" || exit 1; set --; for p in ./* ./.[!.]*; do if [ -e "$p" ] || [ -L "$p" ]; then set -- "$@" "$p"; fi; done; [ "$#" -eq 0 ] && { printf '\0'; exit 0; }; if command -v ionice >/dev/null 2>&1; then ionice -c3 nice -n19 du -0 -xs -B1 -- "$@"; else nice -n19 du -0 -xs -B1 -- "$@"; fi`
+}
+
+func parseSSHDirectoryUsage(raw string) (int, int64, error) {
+	if len(raw) == 0 || len(raw) > 8192 || raw[len(raw)-1] != 0 {
+		return 0, 0, errors.New("invalid directory snapshot")
+	}
+	if raw == "\x00" {
+		return 0, 0, nil
+	}
+	var count int
+	var total int64
+	for _, line := range strings.Split(strings.TrimSuffix(raw, "\x00"), "\x00") {
+		value, name, ok := strings.Cut(line, "\t")
+		if !ok || !strings.HasPrefix(name, "./") || len(name) <= 2 || strings.ContainsAny(name, "\r\n\x00") {
+			return 0, 0, errors.New("invalid directory entry")
+		}
+		size, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || size < 0 || size > 1<<60 || total > 1<<60-size {
+			return 0, 0, errors.New("invalid directory size")
+		}
+		count++
+		total += size
+	}
+	return count, total, nil
+}
+
 func dialPublicSSH(ctx context.Context, network, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil || !validSSHTarget(host) {
@@ -172,7 +203,10 @@ func validSSHTarget(host string) bool {
 // pollSeedboxLoad uses the existing Go SSH dependency with strict host-key
 // verification. The app user must have a private key and trusted known_hosts.
 // Dialing the vetted IP avoids DNS rebinding between validation and connect.
-func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
+func runSSHCommand(ctx context.Context, b *model.Seedbox, command string, timeout time.Duration, maxOutput int) (string, error) {
+	if command == "" {
+		return "", errors.New("no SSH command selected")
+	}
 	if b.SSHUser == "" || len(b.SSHUser) > 64 || strings.HasPrefix(b.SSHUser, "-") || strings.IndexFunc(b.SSHUser, func(c rune) bool {
 		return !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-", c)
 	}) >= 0 || !validSSHTarget(b.Hostname) {
@@ -212,7 +246,7 @@ func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
 	if len(signers) == 0 {
 		return "", errors.New("SSH identity is not configured")
 	}
-	ctx, cancel := context.WithTimeout(ctx, sshPollTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cfg := &ssh.ClientConfig{User: b.SSHUser, Auth: []ssh.AuthMethod{ssh.PublicKeys(signers...)}, HostKeyCallback: verify, Timeout: 5 * time.Second}
 	conn, err := dialPublicSSH(ctx, "tcp", net.JoinHostPort(b.Hostname, "22"))
@@ -220,7 +254,7 @@ func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
 		return "", err
 	}
 	defer conn.Close()
-	if err := conn.SetDeadline(time.Now().Add(sshPollTimeout)); err != nil {
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return "", err
 	}
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
@@ -238,26 +272,47 @@ func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
 	}
 	defer session.Close()
 	var out strings.Builder
-	session.Stdout = &limitedWriter{writer: &out, remaining: 256}
+	session.Stdout = &limitedWriter{writer: &out, remaining: maxOutput}
 	session.Stderr = io.Discard
-	if err := session.Run(sshMetricsCommand(b)); err != nil {
+	if err := session.Run(command); err != nil {
 		return "", err
 	}
-	snap, err := parseSelectedSSHMetrics(out.String(), b)
-	if err != nil {
-		return "", err
-	}
-	result := ""
-	if b.SSHHostMetrics {
-		result = "Host load (1 / 5 / 15 min): " + snap.Load
-	}
-	if b.SSHMemoryMetrics {
-		if result != "" {
-			result += "; "
+	return out.String(), nil
+}
+
+func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
+	var results []string
+	if b.SSHHostMetrics || b.SSHMemoryMetrics {
+		out, err := runSSHCommand(ctx, b, sshMetricsCommand(b), sshPollTimeout, 256)
+		if err != nil {
+			return "", err
 		}
-		result += "Host memory: " + fmtMB(snap.MemoryUsed/(1024*1024)) + " / " + fmtMB(snap.MemoryTotal/(1024*1024))
+		snap, err := parseSelectedSSHMetrics(out, b)
+		if err != nil {
+			return "", err
+		}
+		if b.SSHHostMetrics {
+			results = append(results, "Host load (1 / 5 / 15 min): "+snap.Load)
+		}
+		if b.SSHMemoryMetrics {
+			results = append(results, "Host memory: "+fmtMB(snap.MemoryUsed/(1024*1024))+" / "+fmtMB(snap.MemoryTotal/(1024*1024)))
+		}
 	}
-	return result, nil
+	if b.SSHDirectoryMetrics {
+		out, err := runSSHCommand(ctx, b, sshDirectoryCommand(b), 2*time.Minute, 8192)
+		if err != nil {
+			return "", err
+		}
+		count, size, err := parseSSHDirectoryUsage(out)
+		if err != nil {
+			return "", err
+		}
+		results = append(results, "Top-level home entries: "+strconv.Itoa(count)+" ("+fmtMB(size/(1024*1024))+" total)")
+	}
+	if len(results) == 0 {
+		return "", errors.New("no SSH metrics selected")
+	}
+	return strings.Join(results, "; "), nil
 }
 
 func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
@@ -279,7 +334,7 @@ func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "SSH polling disabled", http.StatusForbidden)
 		return
 	}
-	if !b.SSHHostMetrics && !b.SSHMemoryMetrics {
+	if !b.SSHHostMetrics && !b.SSHMemoryMetrics && !b.SSHDirectoryMetrics {
 		http.Error(w, "No SSH metrics selected", http.StatusForbidden)
 		return
 	}

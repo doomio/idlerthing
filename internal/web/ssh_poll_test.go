@@ -23,6 +23,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -40,7 +43,7 @@ func TestSSHPollMetricsFlagsDefaultOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.SSHHostMetrics || b.SSHMemoryMetrics {
+	if b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics {
 		t.Fatalf("metrics enabled without opt-in: %+v", b)
 	}
 }
@@ -83,9 +86,80 @@ func TestSSHMetricSelection(t *testing.T) {
 	}
 }
 
+func TestDirectoryUsageSelectionAndBounds(t *testing.T) {
+	box := &model.Seedbox{SSHDirectoryMetrics: true}
+	if got := sshDirectoryCommand(box); !strings.Contains(got, `cd "$HOME"`) || !strings.Contains(got, "du -0 -xs -B1 --") || !strings.Contains(got, "nice -n19") {
+		t.Fatalf("unsafe directory command: %q", got)
+	}
+	if got := sshDirectoryCommand(&model.Seedbox{}); got != "" {
+		t.Fatalf("opted-out command: %q", got)
+	}
+	count, size, err := parseSSHDirectoryUsage("1024	./data\x002048	./.cache\x00")
+	if err != nil || count != 2 || size != 3072 {
+		t.Fatalf("directory summary: %d %d %v", count, size, err)
+	}
+	if got, size, err := parseSSHDirectoryUsage("\x00"); err != nil || got != 0 || size != 0 {
+		t.Fatalf("empty home: %d %d %v", got, size, err)
+	}
+	for _, raw := range []string{"", "-1\t./x\x00", "1024\t/etc/passwd\x00", "1024\t./a\x00malformed\x00", "1024\t./a\x00partial", strings.Repeat("x", 8193)} {
+		if _, _, err := parseSSHDirectoryUsage(raw); err == nil {
+			t.Fatalf("accepted malformed directory output: %q", raw[:min(40, len(raw))])
+		}
+	}
+}
+
+func TestDirectoryCommandScopedToHome(t *testing.T) {
+	if _, err := exec.LookPath("du"); err != nil {
+		t.Skip("du unavailable")
+	}
+	home := t.TempDir()
+	if err := os.Mkdir(filepath.Join(home, "data"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "data", "file"), []byte("demo"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc", filepath.Join(home, "outside")); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-c", sshDirectoryCommand(&model.Seedbox{SSHDirectoryMetrics: true}))
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, _, err := parseSSHDirectoryUsage(string(out))
+	if err != nil || count != 2 {
+		t.Fatalf("scoped directory output: count=%d err=%v", count, err)
+	}
+}
+
+func TestDirectoryOnlyPollOptIn(t *testing.T) {
+	_, db, srv := newTestServerFull(t)
+	id, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHDirectoryMetrics: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	srv.sshPoll = func(_ context.Context, box *model.Seedbox) (string, error) {
+		called = true
+		if box.ID != id || !box.SSHDirectoryMetrics || box.SSHHostMetrics || box.SSHMemoryMetrics {
+			t.Fatalf("wrong metrics: %+v", box)
+		}
+		return "Top-level home entries: 2", nil
+	}
+	req := httptest.NewRequest(http.MethodPost, "/seedboxes/1/poll", nil)
+	req.SetPathValue("id", "1")
+	w := httptest.NewRecorder()
+	srv.handleSeedboxPoll(w, req)
+	if w.Code != http.StatusSeeOther || !called {
+		t.Fatalf("directory-only poll: %d called=%v", w.Code, called)
+	}
+}
+
 func TestSSHPollExportImportRoundTrip(t *testing.T) {
 	ts, db, _ := newTestServerFull(t)
-	_, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHHostMetrics: true, SSHMemoryMetrics: true}, nil)
+	_, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHHostMetrics: true, SSHMemoryMetrics: true, SSHDirectoryMetrics: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +173,7 @@ func TestSSHPollExportImportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(body, []byte(`"ssh_poll_enabled":true`)) || !bytes.Contains(body, []byte(`"ssh_user":"demo"`)) || !bytes.Contains(body, []byte(`"ssh_host_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_memory_metrics":true`)) {
+	if !bytes.Contains(body, []byte(`"ssh_poll_enabled":true`)) || !bytes.Contains(body, []byte(`"ssh_user":"demo"`)) || !bytes.Contains(body, []byte(`"ssh_host_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_memory_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_directory_metrics":true`)) {
 		t.Fatal("SSH opt-in absent from export")
 	}
 	restored := freshDB(t)
@@ -107,7 +181,7 @@ func TestSSHPollExportImportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _, err := (&model.SeedboxStore{DB: restored}).Get(t.Context(), 1)
-	if err != nil || !b.SSHPollEnabled || b.SSHUser != "demo" || !b.SSHHostMetrics || !b.SSHMemoryMetrics {
+	if err != nil || !b.SSHPollEnabled || b.SSHUser != "demo" || !b.SSHHostMetrics || !b.SSHMemoryMetrics || !b.SSHDirectoryMetrics {
 		t.Fatalf("SSH opt-in lost on restore: %+v %v", b, err)
 	}
 }

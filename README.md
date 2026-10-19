@@ -186,20 +186,23 @@ JSON/CSV exports do not include the key; restore it separately if needed.
 ## Optional SSH metrics polling
 
 Seedboxes remain passive unless you opt a box in under **Edit seedbox →
-Optional SSH polling** and press **Poll SSH metrics** on its detail page. This
-first read-only poll fetches `/proc/loadavg` and `/proc/meminfo` over SSH. You
-can independently select host load or host memory on each seedbox; no CPU
-utilization percentage is implied by the load average. It does not collect
-per-box I/O, qBittorrent, Docker or background polling yet. No background
-job, agent, or seedbox installation is involved.
+Optional SSH polling** and press **Poll SSH metrics** on its detail page.
+Manual read-only polling fetches only the host load and memory metrics you
+select. A separate directory option measures top-level entries within the
+SSH account's home with low I/O priority and returns an aggregate count and
+size; it may take up to two minutes. No CPU utilization percentage is implied
+by the load average. It does not collect per-box I/O, qBittorrent, Docker or
+background polling yet. No background job, agent, or seedbox installation is
+involved.
 
 The app's OS user needs a non-interactive, unencrypted SSH private key
 (standard `~/.ssh/id_*` files with private permissions) and a pre-verified
 entry for that hostname in `~/.ssh/known_hosts`. Strict host-key checking is
 required; never trust a key obtained from an unverified network scan. The
 app stores only the opt-in and SSH username, never a password or private key.
-Disabled/inactive boxes are never polled. A poll times out after 12 seconds
-and reports failure without showing SSH output or changing inventory. If the
+Disabled/inactive boxes are never polled. Host load/memory polling times out
+after 12 seconds; directory measurement has a two-minute limit. Failed polls
+never show raw SSH output or change inventory. If the
 app runs as a systemd `DynamicUser`, provision its SSH identity and
 known_hosts via a private credential/home mechanism before enabling this
 option; the default service unit does not provide them. Do not enable it if
