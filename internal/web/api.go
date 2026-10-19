@@ -236,6 +236,8 @@ var jsonNameOverrides = map[string]string{
 	"SSHHostMetrics":      "ssh_host_metrics",
 	"SSHMemoryMetrics":    "ssh_memory_metrics",
 	"SSHDirectoryMetrics": "ssh_directory_metrics",
+	"SSHQuotaMetrics":     "ssh_quota_metrics",
+	"SSHTrafficMetrics":   "ssh_traffic_metrics",
 }
 
 // jsonName is the JSON key for a model struct field.

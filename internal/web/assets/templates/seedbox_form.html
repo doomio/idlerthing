@@ -139,6 +139,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       <label class="field"><span class="field-label">Top-level home directory sizes (slow)</span>
         <input type="checkbox" name="ssh_directory_metrics" value="on" {{if $b.SSHDirectoryMetrics}}checked{{end}}>
       </label>
+      <label class="field"><span class="field-label">PMSS account disk quota</span>
+        <input type="checkbox" name="ssh_quota_metrics" value="on" {{if $b.SSHQuotaMetrics}}checked{{end}}>
+      </label>
+      <label class="field"><span class="field-label">PMSS traffic limit and throttle state</span>
+        <input type="checkbox" name="ssh_traffic_metrics" value="on" {{if $b.SSHTrafficMetrics}}checked{{end}}>
+      </label>
       {{with index $v.Errors "ssh_poll_enabled"}}<span class="field-err">{{.}}</span>{{end}}
     </div>
   </section>

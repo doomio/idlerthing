@@ -188,7 +188,9 @@ JSON/CSV exports do not include the key; restore it separately if needed.
 Seedboxes remain passive unless you opt a box in under **Edit seedbox →
 Optional SSH polling** and press **Poll SSH metrics** on its detail page.
 Manual read-only polling fetches only the host load and memory metrics you
-select. A separate directory option measures top-level entries within the
+select. Separate account disk-quota and traffic-limit/throttle options read
+only the chosen PMSS accounting files. A separate directory option measures
+top-level entries within the
 SSH account's home with low I/O priority and returns an aggregate count and
 size; the whole manual poll has a two-minute deadline. The latest result,
 UTC attempt time and a generic failure state remain on the seedbox detail

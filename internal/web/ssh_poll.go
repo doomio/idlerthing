@@ -53,6 +53,105 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+func sshAccountCommand(b *model.Seedbox) string {
+	if !b.SSHQuotaMetrics && !b.SSHTrafficMetrics {
+		return ""
+	}
+	var parts []string
+	if b.SSHQuotaMetrics {
+		parts = append(parts, `if command -v quota >/dev/null 2>&1; then q=$(quota -v -w 2>/dev/null | tail -n 1 | head -c 320); if [ -n "$q" ]; then printf 'quota=%s\n' "$q"; fi; fi; if [ -f "$HOME/.quota" ]; then printf 'quota_file='; head -c 320 "$HOME/.quota"; printf '\n'; fi`)
+	}
+	if b.SSHTrafficMetrics {
+		parts = append(parts, `for k in traffic_limit bonus_traffic; do case "$k" in traffic_limit) f="$HOME/.trafficLimit";; *) f="$HOME/.bonusTraffic";; esac; if [ -f "$f" ]; then printf '%s=' "$k"; head -c 32 "$f"; printf '\n'; fi; done; if [ -e "$HOME/.throttle" ]; then echo throttled=1; else echo throttled=0; fi`)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func parseAccountQuotaUsed(token string) (int64, error) {
+	multiplier := float64(1024)
+	if len(token) > 0 {
+		switch token[len(token)-1] {
+		case 'K':
+			multiplier = 1024
+			token = token[:len(token)-1]
+		case 'M':
+			multiplier = 1024 * 1024
+			token = token[:len(token)-1]
+		case 'G':
+			multiplier = 1024 * 1024 * 1024
+			token = token[:len(token)-1]
+		case 'T':
+			multiplier = 1024 * 1024 * 1024 * 1024
+			token = token[:len(token)-1]
+		}
+	}
+	v, err := strconv.ParseFloat(token, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v*multiplier > 1<<60 {
+		return 0, errors.New("invalid quota")
+	}
+	return int64(v * multiplier), nil
+}
+
+func parseSSHAccountSnapshot(raw string, b *model.Seedbox) (string, error) {
+	if len(raw) == 0 || len(raw) > 1024 {
+		return "", errors.New("invalid account snapshot")
+	}
+	values := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSuffix(raw, "\n"), "\n") {
+		key, val, ok := strings.Cut(line, "=")
+		if !ok || key == "" || strings.ContainsAny(val, "\r\n=") || len(val) > 160 {
+			return "", errors.New("invalid account snapshot")
+		}
+		values[key] = strings.TrimSpace(val)
+	}
+	var results []string
+	if b.SSHQuotaMetrics {
+		rawQuota := values["quota"]
+		if rawQuota == "" {
+			rawQuota = values["quota_file"]
+		}
+		if rawQuota != "" {
+			fields := strings.Fields(rawQuota)
+			if len(fields) < 7 {
+				return "", errors.New("invalid account quota")
+			}
+			usedBytes, err := parseAccountQuotaUsed(fields[1])
+			if err != nil {
+				return "", errors.New("invalid account quota")
+			}
+			softBytes, err := parseAccountQuotaUsed(fields[2])
+			if err != nil {
+				return "", errors.New("invalid account quota")
+			}
+			results = append(results, "Account disk used / soft quota: "+strconv.FormatInt(usedBytes/(1024*1024), 10)+" / "+strconv.FormatInt(softBytes/(1024*1024), 10)+" MiB")
+		} else {
+			results = append(results, "Account disk quota unavailable")
+		}
+	}
+	if b.SSHTrafficMetrics {
+		if values["traffic_limit"] == "" {
+			results = append(results, "Traffic limit unavailable")
+		} else {
+			limit, err := strconv.ParseFloat(values["traffic_limit"], 64)
+			if err != nil || math.IsNaN(limit) || math.IsInf(limit, 0) || limit < 0 || limit > 1e9 {
+				return "", errors.New("invalid account traffic limit")
+			}
+			bonus := 0.0
+			if values["bonus_traffic"] != "" {
+				bonus, err = strconv.ParseFloat(values["bonus_traffic"], 64)
+				if err != nil || math.IsNaN(bonus) || math.IsInf(bonus, 0) || bonus < 0 || bonus > 1e9 {
+					return "", errors.New("invalid account traffic bonus")
+				}
+			}
+			if values["throttled"] != "0" && values["throttled"] != "1" {
+				return "", errors.New("invalid account throttle")
+			}
+			results = append(results, "Traffic limit: "+strconv.FormatFloat(limit+min(bonus, limit), 'f', -1, 64)+" GiB; throttled: "+values["throttled"])
+		}
+	}
+	return strings.Join(results, "; "), nil
+}
+
 func sshDirectoryCommand(b *model.Seedbox) string {
 	if !b.SSHDirectoryMetrics {
 		return ""
@@ -308,6 +407,20 @@ func collectSSHMetrics(ctx context.Context, b *model.Seedbox, run func(context.C
 			failures++
 		}
 	}
+	if b.SSHQuotaMetrics || b.SSHTrafficMetrics {
+		out, err := run(ctx, b, sshAccountCommand(b), sshPollTimeout, 1024)
+		if err == nil {
+			var summary string
+			summary, err = parseSSHAccountSnapshot(out, b)
+			if err == nil {
+				results = append(results, summary)
+			}
+		}
+		if err != nil {
+			results = append(results, "Account metrics unavailable")
+			failures++
+		}
+	}
 	if b.SSHDirectoryMetrics {
 		out, err := run(ctx, b, sshDirectoryCommand(b), 2*time.Minute, 8192)
 		if err == nil {
@@ -351,7 +464,7 @@ func (s *Server) handleSeedboxPoll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "SSH polling disabled", http.StatusForbidden)
 		return
 	}
-	if !b.SSHHostMetrics && !b.SSHMemoryMetrics && !b.SSHDirectoryMetrics {
+	if !b.SSHHostMetrics && !b.SSHMemoryMetrics && !b.SSHDirectoryMetrics && !b.SSHQuotaMetrics && !b.SSHTrafficMetrics {
 		http.Error(w, "No SSH metrics selected", http.StatusForbidden)
 		return
 	}

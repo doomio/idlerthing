@@ -46,7 +46,7 @@ func TestSSHPollMetricsFlagsDefaultOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics {
+	if b.SSHHostMetrics || b.SSHMemoryMetrics || b.SSHDirectoryMetrics || b.SSHQuotaMetrics || b.SSHTrafficMetrics {
 		t.Fatalf("metrics enabled without opt-in: %+v", b)
 	}
 }
@@ -86,6 +86,32 @@ func TestSSHMetricSelection(t *testing.T) {
 	}
 	if _, err := parseSelectedSSHMetrics("MemTotal: 4096 kB junk\nMemAvailable: 1024 kB\n", &model.Seedbox{SSHMemoryMetrics: true}); err == nil {
 		t.Fatal("accepted malformed memory suffix")
+	}
+}
+
+func TestAccountMetricOptInsAndParsing(t *testing.T) {
+	box := &model.Seedbox{SSHQuotaMetrics: true, SSHTrafficMetrics: true}
+	command := sshAccountCommand(box)
+	if !strings.Contains(command, `"$HOME/.quota"`) || !strings.Contains(command, `"$HOME/.trafficLimit"`) {
+		t.Fatalf("account command %q", command)
+	}
+	if sshAccountCommand(&model.Seedbox{}) != "" {
+		t.Fatal("opted-out account command")
+	}
+	result, err := parseSSHAccountSnapshot("quota=demo 1234 2048 4096 1 2 3\ntraffic_limit=2.5\nbonus_traffic=0.5\nthrottled=0\n", box)
+	if err != nil || !strings.Contains(result, "1 / 2 MiB") || !strings.Contains(result, "3 GiB") {
+		t.Fatalf("account summary %q %v", result, err)
+	}
+	if result, err := parseSSHAccountSnapshot("throttled=0\n", &model.Seedbox{SSHTrafficMetrics: true}); err != nil || !strings.Contains(result, "unavailable") {
+		t.Fatalf("missing limit: %q %v", result, err)
+	}
+	if result, err := parseSSHAccountSnapshot("quota=/dev/md2 1659G 2000G 2500G 12345 1000k 1250k\n", &model.Seedbox{SSHQuotaMetrics: true}); err != nil || !strings.Contains(result, "1698816 / 2048000 MiB") {
+		t.Fatalf("humanized quota: %q %v", result, err)
+	}
+	for _, raw := range []string{"", "quota=demo -1 2048 4096 1 2 3\ntraffic_limit=2.5\nbonus_traffic=0.5\nthrottled=0\n", "quota=demo 1234 2048 4096 1 2 3\ntraffic_limit=NaN\nbonus_traffic=0\nthrottled=0\n", strings.Repeat("x", 1025)} {
+		if _, err := parseSSHAccountSnapshot(raw, box); err == nil {
+			t.Fatalf("accepted %q", raw[:min(35, len(raw))])
+		}
 	}
 }
 
@@ -257,9 +283,32 @@ func TestDirectoryOnlyPollOptIn(t *testing.T) {
 	}
 }
 
+func TestAccountOnlyPollOptIn(t *testing.T) {
+	_, db, srv := newTestServerFull(t)
+	id, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHQuotaMetrics: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	srv.sshPoll = func(_ context.Context, box *model.Seedbox) (string, error) {
+		called = true
+		if box.ID != id || !box.SSHQuotaMetrics || box.SSHTrafficMetrics || box.SSHDirectoryMetrics {
+			t.Fatalf("wrong metric selection: %+v", box)
+		}
+		return "Account disk used / soft quota: 1 / 2 MiB", nil
+	}
+	req := httptest.NewRequest(http.MethodPost, "/seedboxes/1/poll", nil)
+	req.SetPathValue("id", "1")
+	w := httptest.NewRecorder()
+	srv.handleSeedboxPoll(w, req)
+	if w.Code != http.StatusSeeOther || !called {
+		t.Fatalf("account-only poll: %d called=%v", w.Code, called)
+	}
+}
+
 func TestSSHPollExportImportRoundTrip(t *testing.T) {
 	ts, db, _ := newTestServerFull(t)
-	_, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHHostMetrics: true, SSHMemoryMetrics: true, SSHDirectoryMetrics: true}, nil)
+	_, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo", SSHHostMetrics: true, SSHMemoryMetrics: true, SSHDirectoryMetrics: true, SSHQuotaMetrics: true, SSHTrafficMetrics: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +322,7 @@ func TestSSHPollExportImportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(body, []byte(`"ssh_poll_enabled":true`)) || !bytes.Contains(body, []byte(`"ssh_user":"demo"`)) || !bytes.Contains(body, []byte(`"ssh_host_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_memory_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_directory_metrics":true`)) {
+	if !bytes.Contains(body, []byte(`"ssh_poll_enabled":true`)) || !bytes.Contains(body, []byte(`"ssh_user":"demo"`)) || !bytes.Contains(body, []byte(`"ssh_host_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_memory_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_directory_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_quota_metrics":true`)) || !bytes.Contains(body, []byte(`"ssh_traffic_metrics":true`)) {
 		t.Fatal("SSH opt-in absent from export")
 	}
 	restored := freshDB(t)
@@ -281,7 +330,7 @@ func TestSSHPollExportImportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _, err := (&model.SeedboxStore{DB: restored}).Get(t.Context(), 1)
-	if err != nil || !b.SSHPollEnabled || b.SSHUser != "demo" || !b.SSHHostMetrics || !b.SSHMemoryMetrics || !b.SSHDirectoryMetrics {
+	if err != nil || !b.SSHPollEnabled || b.SSHUser != "demo" || !b.SSHHostMetrics || !b.SSHMemoryMetrics || !b.SSHDirectoryMetrics || !b.SSHQuotaMetrics || !b.SSHTrafficMetrics {
 		t.Fatalf("SSH opt-in lost on restore: %+v %v", b, err)
 	}
 }
