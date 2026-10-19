@@ -19,6 +19,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"idlerthing/internal/importer"
 	"idlerthing/internal/model"
@@ -122,6 +124,12 @@ func TestDirectoryCommandScopedToHome(t *testing.T) {
 	if err := os.Symlink("/etc", filepath.Join(home, "outside")); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(home, "..hidden"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(home, "line\nbreak"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	cmd := exec.Command("sh", "-c", sshDirectoryCommand(&model.Seedbox{SSHDirectoryMetrics: true}))
 	cmd.Env = append(os.Environ(), "HOME="+home)
 	out, err := cmd.Output()
@@ -129,8 +137,24 @@ func TestDirectoryCommandScopedToHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	count, _, err := parseSSHDirectoryUsage(string(out))
-	if err != nil || count != 2 {
+	if err != nil || count != 4 {
 		t.Fatalf("scoped directory output: count=%d err=%v", count, err)
+	}
+}
+
+func TestDirectoryPollKeepsResultWhenHostUnavailable(t *testing.T) {
+	box := &model.Seedbox{SSHHostMetrics: true, SSHDirectoryMetrics: true}
+	var commands []string
+	poll := func(_ context.Context, _ *model.Seedbox, command string, _ time.Duration, _ int) (string, error) {
+		commands = append(commands, command)
+		if strings.Contains(command, "/proc/loadavg") {
+			return "", errors.New("unavailable")
+		}
+		return "1024\t./data\x00", nil
+	}
+	result, err := collectSSHMetrics(t.Context(), box, poll)
+	if err != nil || !strings.Contains(result, "Top-level home entries: 1") || !strings.Contains(result, "Host metrics unavailable") || len(commands) != 2 {
+		t.Fatalf("partial result: %q %v commands=%d", result, err, len(commands))
 	}
 }
 

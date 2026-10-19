@@ -57,7 +57,7 @@ func sshDirectoryCommand(b *model.Seedbox) string {
 	if !b.SSHDirectoryMetrics {
 		return ""
 	}
-	return `LC_ALL=C; export LC_ALL; cd "$HOME" || exit 1; set --; for p in ./* ./.[!.]*; do if [ -e "$p" ] || [ -L "$p" ]; then set -- "$@" "$p"; fi; done; [ "$#" -eq 0 ] && { printf '\0'; exit 0; }; if command -v ionice >/dev/null 2>&1; then ionice -c3 nice -n19 du -0 -xs -B1 -- "$@"; else nice -n19 du -0 -xs -B1 -- "$@"; fi`
+	return `LC_ALL=C; export LC_ALL; cd "$HOME" || exit 1; set --; for p in ./* ./.[!.]* ./..?*; do if [ -e "$p" ] || [ -L "$p" ]; then set -- "$@" "$p"; fi; done; [ "$#" -eq 0 ] && { printf '\0'; exit 0; }; if command -v ionice >/dev/null 2>&1; then ionice -c3 nice -n19 du -0 -xs -B1 -- "$@"; else nice -n19 du -0 -xs -B1 -- "$@"; fi`
 }
 
 func parseSSHDirectoryUsage(raw string) (int, int64, error) {
@@ -71,7 +71,7 @@ func parseSSHDirectoryUsage(raw string) (int, int64, error) {
 	var total int64
 	for _, line := range strings.Split(strings.TrimSuffix(raw, "\x00"), "\x00") {
 		value, name, ok := strings.Cut(line, "\t")
-		if !ok || !strings.HasPrefix(name, "./") || len(name) <= 2 || strings.ContainsAny(name, "\r\n\x00") {
+		if !ok || !strings.HasPrefix(name, "./") || len(name) <= 2 || strings.ContainsAny(name, "\x00") {
 			return 0, 0, errors.New("invalid directory entry")
 		}
 		size, err := strconv.ParseInt(value, 10, 64)
@@ -281,36 +281,53 @@ func runSSHCommand(ctx context.Context, b *model.Seedbox, command string, timeou
 }
 
 func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
+	return collectSSHMetrics(ctx, b, runSSHCommand)
+}
+
+func collectSSHMetrics(ctx context.Context, b *model.Seedbox, run func(context.Context, *model.Seedbox, string, time.Duration, int) (string, error)) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	var results []string
+	var failures int
 	if b.SSHHostMetrics || b.SSHMemoryMetrics {
-		out, err := runSSHCommand(ctx, b, sshMetricsCommand(b), sshPollTimeout, 256)
+		out, err := run(ctx, b, sshMetricsCommand(b), sshPollTimeout, 256)
+		if err == nil {
+			var snap sshHostSnapshot
+			snap, err = parseSelectedSSHMetrics(out, b)
+			if err == nil {
+				if b.SSHHostMetrics {
+					results = append(results, "Host load (1 / 5 / 15 min): "+snap.Load)
+				}
+				if b.SSHMemoryMetrics {
+					results = append(results, "Host memory: "+fmtMB(snap.MemoryUsed/(1024*1024))+" / "+fmtMB(snap.MemoryTotal/(1024*1024)))
+				}
+			}
+		}
 		if err != nil {
-			return "", err
-		}
-		snap, err := parseSelectedSSHMetrics(out, b)
-		if err != nil {
-			return "", err
-		}
-		if b.SSHHostMetrics {
-			results = append(results, "Host load (1 / 5 / 15 min): "+snap.Load)
-		}
-		if b.SSHMemoryMetrics {
-			results = append(results, "Host memory: "+fmtMB(snap.MemoryUsed/(1024*1024))+" / "+fmtMB(snap.MemoryTotal/(1024*1024)))
+			results = append(results, "Host metrics unavailable")
+			failures++
 		}
 	}
 	if b.SSHDirectoryMetrics {
-		out, err := runSSHCommand(ctx, b, sshDirectoryCommand(b), 2*time.Minute, 8192)
-		if err != nil {
-			return "", err
+		out, err := run(ctx, b, sshDirectoryCommand(b), 2*time.Minute, 8192)
+		if err == nil {
+			var count int
+			var size int64
+			count, size, err = parseSSHDirectoryUsage(out)
+			if err == nil {
+				results = append(results, "Top-level home entries: "+strconv.Itoa(count)+" ("+fmtMB(size/(1024*1024))+" total)")
+			}
 		}
-		count, size, err := parseSSHDirectoryUsage(out)
 		if err != nil {
-			return "", err
+			results = append(results, "Directory usage unavailable")
+			failures++
 		}
-		results = append(results, "Top-level home entries: "+strconv.Itoa(count)+" ("+fmtMB(size/(1024*1024))+" total)")
 	}
 	if len(results) == 0 {
 		return "", errors.New("no SSH metrics selected")
+	}
+	if failures == len(results) {
+		return "", errors.New("SSH observations unavailable")
 	}
 	return strings.Join(results, "; "), nil
 }
