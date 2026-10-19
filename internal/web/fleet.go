@@ -48,12 +48,14 @@ type fleetBox struct {
 	DiskPct     int
 	DiskMeter   *meterView
 
-	Sent       string
-	Received   string
-	SentMB     int64
-	ReceivedMB int64
-	CPUHours   int64
-	Torrents   int64
+	Sent         string
+	Received     string
+	SentMB       int64
+	ReceivedMB   int64
+	CPUHours     int64
+	Torrents     int64
+	TrackedSince string
+	CPUSince     string
 
 	NextDue    string
 	Monthly    string
@@ -197,18 +199,20 @@ func (s *Server) fleetRows(r *http.Request, providerID int64, services []model.P
 // buildFleetBox renders one box from its cached service and inventory values.
 func buildFleetBox(hostname string, svc model.PMService, diskMB sql.NullInt64, due string, monthlyUSD float64) fleetBox {
 	box := fleetBox{
-		Hostname:   hostname,
-		Product:    svc.Product,
-		Status:     svc.Status,
-		Cancelled:  !pulsedmedia.IsActive(svc.Status),
-		DiskUsedMB: svc.DiskUsedBytes / (1024 * 1024),
-		Sent:       fmtMB(svc.SentBytes / (1024 * 1024)),
-		Received:   fmtMB(svc.ReceivedBytes / (1024 * 1024)),
-		SentMB:     svc.SentBytes / (1024 * 1024),
-		ReceivedMB: svc.ReceivedBytes / (1024 * 1024),
-		CPUHours:   svc.CPUHours,
-		Torrents:   svc.Torrents,
-		MonthlyUSD: monthlyUSD,
+		Hostname:     hostname,
+		Product:      svc.Product,
+		Status:       svc.Status,
+		Cancelled:    !pulsedmedia.IsActive(svc.Status),
+		DiskUsedMB:   svc.DiskUsedBytes / (1024 * 1024),
+		Sent:         fmtMB(svc.SentBytes / (1024 * 1024)),
+		Received:     fmtMB(svc.ReceivedBytes / (1024 * 1024)),
+		SentMB:       svc.SentBytes / (1024 * 1024),
+		ReceivedMB:   svc.ReceivedBytes / (1024 * 1024),
+		CPUHours:     svc.CPUHours,
+		Torrents:     svc.Torrents,
+		TrackedSince: svc.TrackedSince,
+		CPUSince:     svc.CPUSince,
+		MonthlyUSD:   monthlyUSD,
 	}
 
 	// The inventory's due date wins when set: it is what the rest of the app

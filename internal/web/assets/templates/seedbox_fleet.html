@@ -99,7 +99,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
     <dl class="kv fleet-metrics">
       <dt>Sent</dt><dd class="mono">{{.Sent}}</dd>
       <dt>Received</dt><dd class="mono">{{.Received}}</dd>
+      {{if .TrackedSince}}<dt>Traffic since</dt><dd class="mono">{{.TrackedSince}}</dd>{{end}}
       <dt>CPU hours</dt><dd class="mono">{{.CPUHours}}</dd>
+      {{if .CPUSince}}<dt>CPU since</dt><dd class="mono">{{.CPUSince}}</dd>{{end}}
       <dt>Torrents</dt><dd class="mono">{{.Torrents}}</dd>
       <dt>Next due</dt><dd class="mono">{{if .NextDue}}{{.NextDue}}{{else}}—{{end}}</dd>
       <dt>Monthly</dt><dd class="mono">{{if .Monthly}}{{.Monthly}}{{else}}—{{end}}</dd>
