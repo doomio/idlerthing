@@ -1,3 +1,19 @@
+// idlerthing — a lightweight, self-hosted inventory for hosting services.
+// Copyright (C) 2026 AlteredParadox
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or (at your
+// option) any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+// for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 package pulsedmedia
 
 import (
@@ -14,7 +30,10 @@ func TestSyncAutoAddAndManualOverride(t *testing.T) {
 	database := syncDB(t)
 	provider := seedProviderKey(t, database, "auto-key")
 	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, feedJSON(svcJSON(101, "Monthly", "10", "2027-01-01", 1073741824), strings.Replace(svcJSON(102, "Monthly", "20", "2027-01-01", 1073741824), `"status":"Active"`, `"status":"Active","domain":"new.example.net"`, 1)))
+		first := svcJSON(101, "Monthly", "10", "2027-01-01", 1024)
+		second := svcJSON(102, "Monthly", "20", "2027-01-01", 1024)
+		second = strings.Replace(second, `"status":"Active"`, `"status":" active ","domain":"new.example.net"`, 1)
+		fmt.Fprint(w, feedJSON(first, second))
 	}))
 	defer feed.Close()
 	locked := seedLinkedSeedbox(t, database, provider, 101, "locked.example.net")

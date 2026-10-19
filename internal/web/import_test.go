@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -42,6 +43,27 @@ func freshDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	return database
+}
+
+func TestSeedboxExportIncludesManualOverride(t *testing.T) {
+	ts, database := newTestServer(t)
+	if _, err := database.Exec(`INSERT INTO seedboxes (hostname,active,pm_manual_override) VALUES ('trophy.example.net',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	client := authedClient(t, ts)
+	resp, err := client.Get(ts.URL + "/export/json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var doc map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	rows := doc["seedboxes"].([]any)
+	if len(rows) != 1 || rows[0].(map[string]any)["seedbox"].(map[string]any)["pm_manual_override"] != true {
+		t.Fatalf("export lost manual override: %v", rows)
+	}
 }
 
 func TestImportRoundTrip(t *testing.T) {

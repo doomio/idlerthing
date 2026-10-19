@@ -141,7 +141,7 @@ func Sync(ctx context.Context, db *sql.DB, providerID int64, key, url string, no
 	}
 	if autoAdd {
 		for _, service := range cached {
-			if service.Status != "Active" || service.Username == "" {
+			if !IsActive(service.Status) || service.Username == "" {
 				continue
 			}
 			hostname := service.Domain
