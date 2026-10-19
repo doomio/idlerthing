@@ -26,6 +26,24 @@ import (
 	"testing"
 )
 
+func TestMigrationVersionsUnique(t *testing.T) {
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]string{}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		prefix, _, _ := strings.Cut(entry.Name(), "_")
+		if prior := seen[prefix]; prior != "" {
+			t.Fatalf("migration version %s reused by %s and %s", prefix, prior, entry.Name())
+		}
+		seen[prefix] = entry.Name()
+	}
+}
+
 var expectedTables = []string{
 	"servers", "server_disks", "shared_hosting", "reseller_hosting",
 	"seedboxes", "domains", "misc_services", "pricings", "ips", "dns",
