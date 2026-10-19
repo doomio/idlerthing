@@ -130,6 +130,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
         <input type="text" name="ssh_user" value="{{$b.SSHUser}}" autocomplete="off">
         {{with index $v.Errors "ssh_user"}}<span class="field-err">{{.}}</span>{{end}}
       </label>
+      <label class="field"><span class="field-label">Host load / CPU count</span>
+        <input type="checkbox" name="ssh_host_metrics" value="on" {{if $b.SSHHostMetrics}}checked{{end}}>
+      </label>
+      <label class="field"><span class="field-label">Host memory</span>
+        <input type="checkbox" name="ssh_memory_metrics" value="on" {{if $b.SSHMemoryMetrics}}checked{{end}}>
+      </label>
+      {{with index $v.Errors "ssh_poll_enabled"}}<span class="field-err">{{.}}</span>{{end}}
     </div>
   </section>
 

@@ -30,6 +30,33 @@ import (
 	"idlerthing/internal/model"
 )
 
+func TestSSHPollMetricsFlagsDefaultOff(t *testing.T) {
+	_, db, _ := newTestServerFull(t)
+	id, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := (&model.SeedboxStore{DB: db}).Get(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.SSHHostMetrics || b.SSHMemoryMetrics {
+		t.Fatalf("metrics enabled without opt-in: %+v", b)
+	}
+}
+
+func TestParseSSHHostSnapshot(t *testing.T) {
+	snap, err := parseSSHHostSnapshot("0.14 0.10 0.05 1/100 123\nMemTotal: 4096 kB\nMemAvailable: 1024 kB\n")
+	if err != nil || snap.Load != "0.14 / 0.10 / 0.05" || snap.MemoryUsed != 3072*1024 || snap.MemoryTotal != 4096*1024 {
+		t.Fatalf("snapshot: %+v err=%v", snap, err)
+	}
+	for _, bad := range []string{"NaN 0 0\nMemTotal: 1 kB\nMemAvailable: 1 kB", "0.1 0.2", "0.1 0.2 0.3\nMemTotal: 1 kB\nMemAvailable: 2 kB", strings.Repeat("x", 257)} {
+		if _, err := parseSSHHostSnapshot(bad); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+}
+
 func TestSSHPollExportImportRoundTrip(t *testing.T) {
 	ts, db, _ := newTestServerFull(t)
 	_, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo"}, nil)
@@ -84,7 +111,7 @@ func TestOptionalSSHPollDefaultsOff(t *testing.T) {
 
 func TestOptionalSSHPollEnabledUsesPinnedHost(t *testing.T) {
 	_, db, srv := newTestServerFull(t)
-	b := &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo"}
+	b := &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHHostMetrics: true, SSHUser: "demo"}
 	id, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), b, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +139,7 @@ func TestOptionalSSHPollEnabledUsesPinnedHost(t *testing.T) {
 
 func TestSSHPollRouteRequiresCSRF(t *testing.T) {
 	ts, db := newTestServer(t)
-	b := &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHUser: "demo"}
+	b := &model.Seedbox{Hostname: "box.example.net", Active: true, SSHPollEnabled: true, SSHHostMetrics: true, SSHUser: "demo"}
 	if _, err := (&model.SeedboxStore{DB: db}).Create(t.Context(), b, nil); err != nil {
 		t.Fatal(err)
 	}
