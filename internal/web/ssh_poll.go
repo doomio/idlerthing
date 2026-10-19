@@ -147,6 +147,11 @@ func pollSeedboxLoad(ctx context.Context, b *model.Seedbox) (string, error) {
 		return "", err
 	}
 	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(sshPollTimeout)); err != nil {
+		return "", err
+	}
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
 	// Preserve the hostname for host-key verification even though the dial used a vetted IP.
 	clientConn, chans, reqs, err := ssh.NewClientConn(conn, net.JoinHostPort(b.Hostname, "22"), cfg)
 	if err != nil {
