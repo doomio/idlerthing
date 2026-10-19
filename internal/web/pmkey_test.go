@@ -139,6 +139,21 @@ func keyURL(kind string, id int64) string {
 	return "/catalogs/" + kind + "/" + strconv.FormatInt(id, 10) + "/key"
 }
 
+func TestProviderKeyOnlyPostKeepsAutoAdd(t *testing.T) {
+	ts, database := newTestServer(t)
+	id := seedProviderWithKey(t, database, testProviderKey)
+	client := authedClient(t, ts)
+	resp := postForm(t, client, ts, keyURL("providers", id), url.Values{"pm_api_key": {"replacement-key"}})
+	resp.Body.Close()
+	var autoAdd bool
+	if err := database.QueryRow("SELECT pm_auto_add FROM providers WHERE id = ?", id).Scan(&autoAdd); err != nil {
+		t.Fatal(err)
+	}
+	if !autoAdd {
+		t.Fatal("key-only update disabled auto-add")
+	}
+}
+
 // The key form follows the write-only secret pattern: a blank field means
 // "keep the stored key", and only an explicit clear removes it.
 func TestProviderKeyFormBlankKeepsExisting(t *testing.T) {

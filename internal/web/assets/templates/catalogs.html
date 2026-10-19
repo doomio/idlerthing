@@ -66,6 +66,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
         <form class="row-edit" method="post" action="/catalogs/{{$v.Kind}}/{{.ID}}/key"
               hx-post="/catalogs/{{$v.Kind}}/{{.ID}}/key" hx-target="#catalog-list" hx-swap="innerHTML">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="pm_auto_add_present" value="1">
           <input type="password" name="pm_api_key" value="" autocomplete="new-password"
                  placeholder="{{if index $v.HasKey .ID}}key set — blank keeps it{{else}}add key for PM sync{{end}}"
                  aria-label="PulsedMedia API key">

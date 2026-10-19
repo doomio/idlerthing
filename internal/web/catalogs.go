@@ -219,7 +219,7 @@ func (s *Server) handleProviderKey(w http.ResponseWriter, r *http.Request) {
 	default:
 		errMsg = "Save failed."
 	}
-	if errMsg == "" {
+	if errMsg == "" && r.FormValue("pm_auto_add_present") != "" {
 		_, err = s.db.ExecContext(r.Context(), "UPDATE providers SET pm_auto_add = ? WHERE id = ?", boolToIntWeb(r.FormValue("pm_auto_add") != ""), id)
 		if err != nil {
 			errMsg = "Save failed."
