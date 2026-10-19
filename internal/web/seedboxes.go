@@ -134,6 +134,14 @@ func (s *Server) seedboxSection() *section {
 				title = b.Title.String
 			}
 			sid := strconv.FormatInt(b.ID, 10)
+			pollURL := ""
+			if b.SSHPollEnabled && b.Active {
+				pollURL = routeSeedboxes + "/" + sid + "/poll"
+			}
+			sshStatus := "Off"
+			if b.SSHPollEnabled {
+				sshStatus = "Enabled (manual)"
+			}
 			return &detailView{
 				Title:         title,
 				Mono:          true,
@@ -141,6 +149,7 @@ func (s *Server) seedboxSection() *section {
 				EditURL:       routeSeedboxes + "/" + sid + "/edit",
 				DeleteURL:     routeSeedboxes + "/" + sid + "/delete",
 				DeleteConfirm: "Delete " + b.Hostname + "?",
+				PollURL:       pollURL,
 				Cards: []infoCard{
 					{Title: "Service", Pairs: []kvPair{
 						kvs("Title", b.Title),
@@ -158,6 +167,10 @@ func (s *Server) seedboxSection() *section {
 						kvs("Owned since", b.OwnedSince),
 					}},
 					{Title: "Pricing", Pairs: pricingPairs(pricing), Empty: "No pricing attached."},
+					{Title: "SSH polling", Pairs: []kvPair{
+						{K: "Status", V: sshStatus},
+						{K: "SSH user", V: dash(b.SSHUser)},
+					}},
 				},
 			}, nil
 		},
@@ -341,17 +354,37 @@ func (s *Server) handleSeedboxUpdate(w http.ResponseWriter, r *http.Request) {
 func parseSeedboxForm(r *http.Request) (*model.Seedbox, *model.Pricing, map[string]string) {
 	errs := map[string]string{}
 	b := &model.Seedbox{
-		Title:       nullStrFormValue(r, "title"),
-		Hostname:    strings.TrimSpace(r.FormValue("hostname")),
-		SeedBoxType: nullStrFormValue(r, "seed_box_type"),
-		ProviderID:  nullIntFormValue(r, "provider_id"),
-		LocationID:  nullIntFormValue(r, "location_id"),
-		Active:      r.FormValue("active") != "",
-		ShowPublic:  r.FormValue("show_public") != "",
-		WasPromo:    r.FormValue("was_promo") != "",
+		Title:          nullStrFormValue(r, "title"),
+		Hostname:       strings.TrimSpace(r.FormValue("hostname")),
+		SeedBoxType:    nullStrFormValue(r, "seed_box_type"),
+		ProviderID:     nullIntFormValue(r, "provider_id"),
+		LocationID:     nullIntFormValue(r, "location_id"),
+		Active:         r.FormValue("active") != "",
+		ShowPublic:     r.FormValue("show_public") != "",
+		WasPromo:       r.FormValue("was_promo") != "",
+		SSHPollEnabled: r.FormValue("ssh_poll_enabled") != "",
+		SSHUser:        strings.TrimSpace(r.FormValue("ssh_user")),
 	}
 	if b.Hostname == "" {
 		errs["hostname"] = "Hostname is required."
+	}
+	if b.SSHPollEnabled && b.SSHUser == "" {
+		errs["ssh_user"] = "SSH username is required when polling is enabled."
+	}
+	if b.SSHPollEnabled && !validSSHTarget(b.Hostname) {
+		errs["hostname"] = "SSH polling requires a DNS hostname, not an IP or local address."
+	}
+	if len(b.SSHUser) > 64 {
+		errs["ssh_user"] = "SSH username is too long."
+	}
+	if strings.HasPrefix(b.SSHUser, "-") {
+		errs["ssh_user"] = "SSH username cannot start with -."
+	}
+	for _, c := range b.SSHUser {
+		if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-", c) {
+			errs["ssh_user"] = "Use letters, numbers, _, . or - in SSH username."
+			break
+		}
 	}
 	b.PortSpeed = checkedInt(r, errs, "port_speed", 0, 1<<20)
 	b.DiskAsMB = sizeFormValue(r, errs, "disk_as_mb", 1<<30)

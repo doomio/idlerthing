@@ -229,8 +229,10 @@ func flattenValue(rv reflect.Value) any {
 // "ipid", while the DB columns, the importer and the export format all say
 // is_ipv4 / ip_id.
 var jsonNameOverrides = map[string]string{
-	"IsIPv4": "is_ipv4",
-	"IPID":   "ip_id",
+	"IsIPv4":         "is_ipv4",
+	"IPID":           "ip_id",
+	"SSHPollEnabled": "ssh_poll_enabled",
+	"SSHUser":        "ssh_user",
 }
 
 // jsonName is the JSON key for a model struct field.

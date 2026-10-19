@@ -970,10 +970,18 @@ func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 		if !imp.requireName(b, "hostname", "seedbox") {
 			continue
 		}
+		sshUser := sget(b, "ssh_user")
+		sshEnabled := bget(b, "ssh_poll_enabled")
+		if sshEnabled && (sshUser == "" || len(sshUser) > 64 || strings.HasPrefix(sshUser, "-") || strings.IndexFunc(sshUser, func(c rune) bool {
+			return !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-", c)
+		}) >= 0) {
+			sshEnabled = false // imported data never turns on an unusable target
+		}
 		res, err := imp.tx.ExecContext(ctx, `
 			INSERT INTO seedboxes (title, hostname, seed_box_type, provider_id, location_id,
-				port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo, owned_since)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo, owned_since,
+				ssh_poll_enabled, ssh_user)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			sgetN(b, "title"), sget(b, "hostname"), sgetN(b, "seed_box_type"),
 			imp.remapCatalog("providers", nget(b, "provider_id")),
 			imp.remapCatalog("locations", nget(b, "location_id")),
@@ -981,7 +989,8 @@ func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 			imp.boundedInt(nget(b, "disk_as_mb"), 1<<30, "disk_as_mb", sget(b, "hostname")),
 			imp.boundedInt(nget(b, "bandwidth_as_mb"), 1<<30, "bandwidth_as_mb", sget(b, "hostname")),
 			bint(bget(b, "active")), bint(bget(b, "show_public")),
-			bint(bget(b, "was_promo")), imp.normOwned(sgetN(b, "owned_since"), sget(b, "hostname")))
+			bint(bget(b, "was_promo")), imp.normOwned(sgetN(b, "owned_since"), sget(b, "hostname")),
+			bint(sshEnabled), sshUser)
 		if err != nil {
 			return fmt.Errorf("import seedbox %q: %w", sget(b, "hostname"), err)
 		}
