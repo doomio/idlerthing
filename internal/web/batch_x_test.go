@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -178,5 +179,54 @@ func TestPingBinaryMissing(t *testing.T) {
 	_, err := execPing("127.0.0.1")
 	if !errors.Is(err, errPingUnavailable) {
 		t.Fatalf("want errPingUnavailable, got %v", err)
+	}
+}
+
+// Editing a DNS record that is linked to hosting must keep the link: the
+// edit form has no shared/reseller picker, so it carries the existing link
+// through a hidden input — without it, Update writes NULL and the record is
+// silently unlinked on every unrelated edit.
+func TestDNSEditPreservesHostingLink(t *testing.T) {
+	ts, database := newTestServer(t)
+	client := authedClient(t, ts)
+	postForm(t, client, ts, "/shared", url.Values{"main_domain": {"links.example.com"}, "active": {"on"}}).Body.Close()
+	postForm(t, client, ts, "/reseller", url.Values{"main_domain": {"res-links.example.com"}, "active": {"on"}}).Body.Close()
+	postForm(t, client, ts, "/dns", url.Values{
+		"hostname": {"a.links.example.com"}, "dns_type": {"A"}, "address": {"203.0.113.9"}, "shared_id": {"1"},
+	}).Body.Close()
+	postForm(t, client, ts, "/dns", url.Values{
+		"hostname": {"mx.res-links.example.com"}, "dns_type": {"MX"}, "address": {"203.0.113.10"}, "reseller_id": {"1"},
+	}).Body.Close()
+
+	cases := []struct {
+		id    int
+		field string
+	}{{1, "shared_id"}, {2, "reseller_id"}}
+	for _, c := range cases {
+		resp, err := client.Get(ts.URL + "/dns/" + strconv.Itoa(c.id) + "/edit")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := readBody(t, resp)
+		resp.Body.Close()
+		want := `name="` + c.field + `" value="1"`
+		if !strings.Contains(body, want) {
+			t.Fatalf("edit form for dns/%d missing hidden input %s", c.id, want)
+		}
+		postForm(t, client, ts, "/dns/"+strconv.Itoa(c.id)+"/update", url.Values{
+			"hostname": {"renamed.example.com"}, "dns_type": {"A"}, "address": {"203.0.113.11"},
+			c.field: {"1"},
+		}).Body.Close()
+		var shared, reseller int64
+		if err := database.QueryRow("SELECT COALESCE(shared_id,-1), COALESCE(reseller_id,-1) FROM dns WHERE id = ?", c.id).Scan(&shared, &reseller); err != nil {
+			t.Fatal(err)
+		}
+		linked := shared
+		if c.field == "reseller_id" {
+			linked = reseller
+		}
+		if linked != 1 {
+			t.Errorf("dns/%d: %s = %d after edit, want link preserved (1)", c.id, c.field, linked)
+		}
 	}
 }

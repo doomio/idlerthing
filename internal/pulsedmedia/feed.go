@@ -99,8 +99,42 @@ type Amount float64
 // UnmarshalJSON decodes a money value sent as a quoted string or a number,
 // never failing: an unparsable value decodes as 0 (see Amount).
 func (a *Amount) UnmarshalJSON(b []byte) error {
-	*a = Amount(parseAmount(strings.Trim(strings.TrimSpace(string(b)), `"`)))
+	s := strings.TrimSpace(string(b))
+	if !strings.HasPrefix(s, `"`) {
+		// A bare JSON number: decode it directly so exponent notation (1e2)
+		// keeps its exponent instead of losing the 'e' to the character strip.
+		var f float64
+		if err := json.Unmarshal(b, &f); err == nil {
+			*a = Amount(clampAmount(f))
+			return nil
+		}
+		*a = 0
+		return nil
+	}
+	// A quoted string: decode the JSON escapes first ("\u20ac" is "€"; the
+	// raw text would otherwise leak its escape digits into the amount), then
+	// try a plain float parse so exponent notation survives the separator
+	// heuristics below.
+	var str string
+	if err := json.Unmarshal(b, &str); err == nil {
+		if f, err := strconv.ParseFloat(strings.TrimSpace(str), 64); err == nil {
+			*a = Amount(clampAmount(f))
+			return nil
+		}
+		*a = Amount(parseAmount(str))
+		return nil
+	}
+	*a = 0
 	return nil
+}
+
+// clampAmount maps NaN/Inf/absurd magnitudes to 0: no real invoice is
+// anywhere near 1e12.
+func clampAmount(f float64) float64 {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f > 1e12 || f < -1e12 {
+		return 0
+	}
+	return f
 }
 
 // parseAmount parses a money string in various thousands/decimal-separator

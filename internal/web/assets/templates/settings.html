@@ -155,6 +155,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
     <p class="empty-sub">
       {{if $v.TokenSet}}A token is currently set. Generating a new one replaces it.{{else}}No token set. The API is disabled until you generate one.{{end}}
     </p>
+    {{/* Name the token's blast radius: it is a full read-write credential, not
+         a view-only key, so leaking it lets a client mutate the inventory. */}}
+    <p class="field-hint">
+      This token grants full read/write access to the servers API — create, update,
+      and delete. Treat it like a password and share it only with clients you trust.
+    </p>
     <form method="post" action="/settings/account"
           data-confirm="Generating a new token replaces the current one, and every client using it stops working. Continue?">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">

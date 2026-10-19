@@ -167,3 +167,40 @@ func TestNormTimestamp(t *testing.T) {
 		}
 	}
 }
+
+// A restore must not silently drop state the app owns: the seedbox feed
+// link (pm_service_id) and the pricing month-end anchor (due_day). A legacy
+// export without due_day derives the anchor from the stored date.
+func TestImportPreservesFeedLinkAndDueAnchor(t *testing.T) {
+	database := testDB(t)
+	doc := `{"format":1,
+	  "servers":[{"server":{"id":1,"hostname":"anchor.test","active":true}},
+	              {"server":{"id":4,"hostname":"legacy.test","active":true}}],
+	  "seedboxes":[{"seedbox":{"id":2,"hostname":"sb.linked.test","active":true,"pm_service_id":4210}},
+	                {"seedbox":{"id":3,"hostname":"sb.plain.test","active":true}}],
+	  "pricings":[{"service_id":1,"service_type":1,"currency":"USD","price":5,"term":1,"next_due_date":"2026-01-31","due_day":31},
+	                {"service_id":4,"service_type":1,"currency":"USD","price":2,"term":1,"next_due_date":"2026-03-15"}]}`
+	if _, err := Import(context.Background(), database, strings.NewReader(doc), false); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	var pm int64
+	database.QueryRow("SELECT COALESCE(pm_service_id, -1) FROM seedboxes WHERE hostname = 'sb.linked.test'").Scan(&pm)
+	if pm != 4210 {
+		t.Errorf("linked seedbox pm_service_id = %d, want 4210", pm)
+	}
+	database.QueryRow("SELECT COALESCE(pm_service_id, -1) FROM seedboxes WHERE hostname = 'sb.plain.test'").Scan(&pm)
+	if pm != -1 {
+		t.Errorf("unlinked seedbox pm_service_id = %d, want NULL", pm)
+	}
+	for c, want := range map[string]int64{"anchor.test": 31, "legacy.test": 15} {
+		var got int64
+		if err := database.QueryRow(`SELECT COALESCE(p.due_day, -1) FROM pricings p
+			JOIN servers s ON s.id = p.service_id AND p.service_type = 1
+			WHERE s.hostname = ?`, c).Scan(&got); err != nil {
+			t.Fatalf("query %s: %v", c, err)
+		}
+		if got != want {
+			t.Errorf("%s: due_day = %d, want %d", c, got, want)
+		}
+	}
+}

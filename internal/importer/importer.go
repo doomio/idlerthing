@@ -416,10 +416,10 @@ func (imp *importer) topLevelPricings(ctx context.Context, doc map[string]any) e
 			due = sql.NullString{String: d, Valid: true}
 		}
 		res, err := imp.tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO pricings (service_id, service_type, currency, price, term, next_due_date, active)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			INSERT OR IGNORE INTO pricings (service_id, service_type, currency, price, term, next_due_date, due_day, active)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			newService, serviceType, cur, fget(pm, "price"),
-			int64(fget(pm, "term")), due, bint(bgetDefault(pm, "active", true)))
+			int64(fget(pm, "term")), due, importDueDay(pm, due), bint(bgetDefault(pm, "active", true)))
 		if err != nil {
 			return err
 		}
@@ -688,14 +688,29 @@ func (imp *importer) insertPricing(ctx context.Context, pm map[string]any, servi
 		due = sql.NullString{String: d, Valid: true}
 	}
 	_, err := imp.tx.ExecContext(ctx, `
-		INSERT INTO pricings (service_id, service_type, currency, price, term, next_due_date, active)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO pricings (service_id, service_type, currency, price, term, next_due_date, due_day, active)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		serviceID, serviceType, cur, fget(pm, "price"),
-		int64(fget(pm, "term")), due, bint(bgetDefault(pm, "active", true)))
+		int64(fget(pm, "term")), due, importDueDay(pm, due), bint(bgetDefault(pm, "active", true)))
 	if err == nil {
 		imp.sum.Pricings++
 	}
 	return err
+}
+
+// importDueDay restores the month-end anchor for an imported pricing row:
+// an exported due_day in 1..31 wins; a legacy export (no key) derives the
+// anchor from the stored date, matching what an explicit save would write.
+func importDueDay(pm map[string]any, due sql.NullString) sql.NullInt64 {
+	if d := nget(pm, "due_day"); d.Valid && d.Int64 >= 1 && d.Int64 <= 31 {
+		return d
+	}
+	if due.Valid {
+		if t, err := time.Parse(time.DateOnly, due.String); err == nil {
+			return sql.NullInt64{Int64: int64(t.Day()), Valid: true}
+		}
+	}
+	return sql.NullInt64{}
 }
 
 // boundedInt re-validates a nullable numeric against the same plausibility
@@ -980,8 +995,8 @@ func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 		res, err := imp.tx.ExecContext(ctx, `
 			INSERT INTO seedboxes (title, hostname, seed_box_type, provider_id, location_id,
 				port_speed, disk_as_mb, bandwidth_as_mb, active, show_public, was_promo, owned_since,
-				ssh_poll_enabled, ssh_user)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				pm_service_id, ssh_poll_enabled, ssh_user)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			sgetN(b, "title"), sget(b, "hostname"), sgetN(b, "seed_box_type"),
 			imp.remapCatalog("providers", nget(b, "provider_id")),
 			imp.remapCatalog("locations", nget(b, "location_id")),
@@ -990,7 +1005,7 @@ func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 			imp.boundedInt(nget(b, "bandwidth_as_mb"), 1<<30, "bandwidth_as_mb", sget(b, "hostname")),
 			bint(bget(b, "active")), bint(bget(b, "show_public")),
 			bint(bget(b, "was_promo")), imp.normOwned(sgetN(b, "owned_since"), sget(b, "hostname")),
-			bint(sshEnabled), sshUser)
+			nget(b, "pm_service_id"), bint(sshEnabled), sshUser)
 		if err != nil {
 			return fmt.Errorf("import seedbox %q: %w", sget(b, "hostname"), err)
 		}

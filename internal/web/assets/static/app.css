@@ -533,6 +533,9 @@ button.pill { font-family: inherit; cursor: pointer; }
   padding: 6px 10px;
 }
 .search-input:focus { outline: none; border-color: var(--acc); }
+/* the search GET form must not add a layout box between the flex container
+   and the input (it exists only to carry status+q as request parameters) */
+.search-form { display: contents; }
 
 /* ---------- Tables ---------- */
 .tbl {

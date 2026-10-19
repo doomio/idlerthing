@@ -263,7 +263,9 @@ type hostingFormView struct {
 	Providers  []model.CatalogItem
 	Locations  []model.CatalogItem
 	Currencies []string
-	Errors     map[string]string
+	// DefaultCurrency pre-fills the currency select when no pricing exists.
+	DefaultCurrency string
+	Errors          map[string]string
 }
 
 // handleHostingNew renders GET {base}/new.
@@ -307,6 +309,7 @@ func (s *Server) renderHostingForm(w http.ResponseWriter, r *http.Request, cfg *
 		view.Locations, _ = s.catalogs.List(r.Context(), model.Catalogs["locations"])
 	}
 	view.Currencies = currencies
+	view.DefaultCurrency = s.defaultCurrency(r)
 	title := strings.TrimPrefix(cfg.addLabel, "＋ ")
 	view.CancelURL = cfg.base
 	if view.IsEdit {

@@ -58,6 +58,11 @@ type fleetBox struct {
 	NextDue    string
 	Monthly    string
 	MonthlyUSD float64
+
+	// Provider names the owning feed; Stale marks that provider's cache as
+	// older than fleetStaleAfter so a fresh sibling provider cannot hide it.
+	Provider string
+	Stale    bool
 }
 
 // fleetTotals are the headline tiles. They count active services only: a
@@ -120,17 +125,29 @@ func (s *Server) buildFleetView(r *http.Request) (fleetView, error) {
 		view.RatesNote = "exchange rates unavailable — showing USD only"
 	}
 
+	// Staleness is judged per provider: one page-wide newest timestamp
+	// would let a freshly-synced feed hide a sibling whose feed stopped.
+	// The header's stale badge means "AT LEAST ONE provider is stale".
 	for _, p := range providers {
 		services, err := (&model.PMStore{DB: s.db}).List(r.Context(), p.ID)
 		if err != nil {
 			return view, err
 		}
+		providerNewest := time.Time{}
 		for _, svc := range services {
-			if t, err := time.Parse(time.RFC3339, svc.SyncedAt); err == nil && t.After(newest) {
-				newest = t
+			if t, err := time.Parse(time.RFC3339, svc.SyncedAt); err == nil && t.After(providerNewest) {
+				providerNewest = t
 			}
 		}
-		boxes, err := s.fleetRows(r, p.ID, services, rates)
+		if !providerNewest.IsZero() {
+			if providerNewest.After(newest) {
+				newest = providerNewest
+			}
+			if time.Since(providerNewest) > fleetStaleAfter {
+				view.Stale = true
+			}
+		}
+		boxes, err := s.fleetRows(r, p.Name, p.ID, services, rates)
 		if err != nil {
 			return view, err
 		}
@@ -139,14 +156,13 @@ func (s *Server) buildFleetView(r *http.Request) (fleetView, error) {
 
 	if !newest.IsZero() {
 		view.SyncedAt = newest.Format("2006-01-02 15:04")
-		view.Stale = time.Since(newest) > fleetStaleAfter
 	}
 	view.Totals = fleetTiles(view.Boxes)
 	return view, nil
 }
 
 // fleetRows joins one provider's linked seedboxes to its cached services.
-func (s *Server) fleetRows(r *http.Request, providerID int64, services []model.PMService, rates map[string]float64) ([]fleetBox, error) {
+func (s *Server) fleetRows(r *http.Request, providerName string, providerID int64, services []model.PMService, rates map[string]float64) ([]fleetBox, error) {
 	byService := make(map[int64]model.PMService, len(services))
 	for _, svc := range services {
 		byService[svc.ServiceID] = svc
@@ -189,15 +205,16 @@ func (s *Server) fleetRows(r *http.Request, providerID int64, services []model.P
 			Price:    price.Float64,
 			Term:     int(term.Int64),
 		}, rates)
-		out = append(out, buildFleetBox(hostname, svc, diskMB, due.String, monthlyUSD))
+		out = append(out, buildFleetBox(hostname, providerName, svc, diskMB, due.String, monthlyUSD))
 	}
 	return out, rows.Err()
 }
 
 // buildFleetBox renders one box from its cached service and inventory values.
-func buildFleetBox(hostname string, svc model.PMService, diskMB sql.NullInt64, due string, monthlyUSD float64) fleetBox {
+func buildFleetBox(hostname, providerName string, svc model.PMService, diskMB sql.NullInt64, due string, monthlyUSD float64) fleetBox {
 	box := fleetBox{
 		Hostname:   hostname,
+		Provider:   providerName,
 		Product:    svc.Product,
 		Status:     svc.Status,
 		Cancelled:  !pulsedmedia.IsActive(svc.Status),
@@ -209,6 +226,9 @@ func buildFleetBox(hostname string, svc model.PMService, diskMB sql.NullInt64, d
 		CPUHours:   svc.CPUHours,
 		Torrents:   svc.Torrents,
 		MonthlyUSD: monthlyUSD,
+	}
+	if t, err := time.Parse(time.RFC3339, svc.SyncedAt); err == nil {
+		box.Stale = time.Since(t) > fleetStaleAfter
 	}
 
 	// The inventory's due date wins when set: it is what the rest of the app

@@ -166,7 +166,7 @@ func (s *Server) addSharedSections(r *http.Request, out map[string]any) bool {
 func (s *Server) exportPricings(r *http.Request) (any, error) {
 	rows, err := model.QuerierFrom(r.Context(), s.db).QueryContext(r.Context(), `
 		SELECT id, service_id, service_type, currency, price, term,
-			next_due_date, active, created_at, updated_at
+			next_due_date, due_day, active, created_at, updated_at
 		FROM pricings ORDER BY service_type, service_id`)
 	if err != nil {
 		return nil, err
@@ -178,7 +178,7 @@ func (s *Server) exportPricings(r *http.Request) (any, error) {
 		var active int
 		var ca, ua string
 		if err := rows.Scan(&p.ID, &p.ServiceID, &p.ServiceType, &p.Currency,
-			&p.Price, &p.Term, &p.NextDueDate, &active, &ca, &ua); err != nil {
+			&p.Price, &p.Term, &p.NextDueDate, &p.DueDay, &active, &ca, &ua); err != nil {
 			return nil, err
 		}
 		p.Active = active != 0

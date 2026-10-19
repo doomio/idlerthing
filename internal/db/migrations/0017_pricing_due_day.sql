@@ -1,0 +1,28 @@
+-- idlerthing — a lightweight, self-hosted inventory for hosting services.
+-- Copyright (C) 2026 AlteredParadox
+--
+-- This program is free software: you can redistribute it and/or modify it
+-- under the terms of the GNU Affero General Public License as published by
+-- the Free Software Foundation, either version 3 of the License, or (at your
+-- option) any later version.
+--
+-- This program is distributed in the hope that it will be useful, but WITHOUT
+-- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+-- FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+-- for more details.
+--
+-- You should have received a copy of the GNU Affero General Public License
+-- along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+-- 0017_pricing_due_day.sql — the day-of-month a recurring due date aims for.
+--
+-- Month-end clamping (Jan 31 + 1 month → Feb 28) is correct for one step,
+-- but a persisted clamp re-anchors every later cycle to the short month:
+-- a rollover that runs in February stores Feb 28, and March then advances it
+-- to Mar 28, April to Apr 28. The anchor lets each step aim at the 31st
+-- again. Explicit writes (forms, feed sync) re-derive it from the date they
+-- store; the lazy rollover in AdvanceDueDates deliberately leaves it alone.
+-- NULL on pre-existing rows means "use the stored date's day" — the
+-- pre-migration behaviour — until that due date is next written by hand or
+-- by a sync.
+ALTER TABLE pricings ADD COLUMN due_day INTEGER;

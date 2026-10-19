@@ -23,7 +23,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
     <h1>PulsedMedia fleet</h1>
     <div class="page-sub">
       {{if $v.SyncedAt}}synced {{$v.SyncedAt}}{{else}}never synced{{end}}
-      {{if $v.Stale}}<span class="badge badge-warn">stale</span>{{end}}
+      {{if $v.Stale}}<span class="badge badge-warn" title="at least one provider's feed is older than 6h; stale cards are marked">stale</span>{{end}}
     </div>
     {{if $v.RatesNote}}<div class="page-sub">{{$v.RatesNote}}</div>{{end}}
   </div>
@@ -86,6 +86,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       {{else if .Status}}
       <span class="badge badge-ok">{{.Status}}</span>
       {{end}}
+      {{if .Stale}}<span class="badge badge-warn" title="{{.Provider}}'s cached data is older than 6h">stale</span>{{end}}
     </div>
     <div class="page-sub">{{if .Product}}{{.Product}}{{else}}—{{end}}</div>
 

@@ -127,7 +127,9 @@ type miscFormView struct {
 	Misc       *model.MiscService
 	Pricing    *model.Pricing
 	Currencies []string
-	Errors     map[string]string
+	// DefaultCurrency pre-fills the currency select when no pricing exists.
+	DefaultCurrency string
+	Errors          map[string]string
 }
 
 // handleMiscNew renders GET /misc/new.
@@ -166,6 +168,7 @@ func (s *Server) handleMiscEdit(w http.ResponseWriter, r *http.Request) {
 // renderMiscForm renders the shared new/edit form.
 func (s *Server) renderMiscForm(w http.ResponseWriter, r *http.Request, view miscFormView) {
 	view.Currencies = currencies
+	view.DefaultCurrency = s.defaultCurrency(r)
 	title := "Add service"
 	view.CancelURL = routeMisc
 	if view.IsEdit {

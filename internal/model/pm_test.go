@@ -18,6 +18,7 @@ package model
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 )
 
@@ -232,5 +233,51 @@ func TestPMStoreReplaceEmptyClears(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("empty replace must clear, got %+v", got)
+	}
+}
+
+func TestBumpFeedDueBaselineWithoutCompleteLink(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		provider, service sql.NullInt64
+	}{
+		{"no provider", sql.NullInt64{}, sql.NullInt64{Int64: 101, Valid: true}},
+		{"no service", sql.NullInt64{Int64: 7, Valid: true}, sql.NullInt64{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database := testDB(t)
+			ctx := context.Background()
+			if _, err := database.Exec("INSERT INTO providers (id, name) VALUES (7, 'Example Host')"); err != nil {
+				t.Fatal(err)
+			}
+			service := samplePMServices()[0]
+			if err := (&PMStore{DB: database}).Replace(ctx, 7, []PMService{service}); err != nil {
+				t.Fatal(err)
+			}
+			res, err := database.Exec("INSERT INTO seedboxes (hostname, provider_id, pm_service_id) VALUES ('box.example.net', ?, ?)",
+				tc.provider, tc.service)
+			if err != nil {
+				t.Fatal(err)
+			}
+			box, err := res.LastInsertId()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tx, err := database.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if err := BumpFeedDueBaselineTx(ctx, tx, box, service.NextDue, "2026-12-01"); err != nil {
+				t.Fatal(err)
+			}
+			var due string
+			if err := tx.QueryRowContext(ctx, "SELECT next_due FROM pm_services WHERE provider_id = 7 AND service_id = 101").Scan(&due); err != nil {
+				t.Fatal(err)
+			}
+			if due != service.NextDue {
+				t.Fatalf("incomplete link changed the feed baseline: %q", due)
+			}
+		})
 	}
 }

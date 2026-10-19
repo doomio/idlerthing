@@ -154,7 +154,9 @@ type domainFormView struct {
 	Pricing    *model.Pricing
 	Providers  []model.CatalogItem
 	Currencies []string
-	Errors     map[string]string
+	// DefaultCurrency pre-fills the currency select when no pricing exists.
+	DefaultCurrency string
+	Errors          map[string]string
 }
 
 // handleDomainNew renders GET /domains/new.
@@ -196,6 +198,7 @@ func (s *Server) renderDomainForm(w http.ResponseWriter, r *http.Request, view d
 		view.Providers, _ = s.catalogs.List(r.Context(), model.Catalogs["providers"])
 	}
 	view.Currencies = currencies
+	view.DefaultCurrency = s.defaultCurrency(r)
 	title := "Add domain"
 	view.CancelURL = routeDomains
 	if view.IsEdit {
