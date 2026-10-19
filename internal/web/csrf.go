@@ -17,6 +17,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -43,20 +44,34 @@ func (s *Server) csrfProtect(next http.Handler) http.Handler {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		// Body hardening BEFORE any form parsing (the FormValue below parses
-		// the body): refuse multipart outright — the app has no legitimate
-		// multipart forms, and ParseMultipartForm would buffer 32MB in memory
-		// plus spill to disk — and cap urlencoded bodies at 1MB (the largest
-		// legit form, a server edit with 4 disks, is a few KB).
-		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		// Only Settings import accepts multipart: 1MB memory, 10MB total.
+		// URL-encoded forms retain their 1MB limit; spill files are removed.
+		multipartImport := r.URL.Path == "/settings/import" && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data")
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") && !multipartImport {
 			http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-		// Parse explicitly — FormValue swallows parse errors, and a
-		// malformed form must not pass on a header token alone.
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad request", http.StatusBadRequest)
+		limit := int64(1 << 20)
+		if multipartImport {
+			limit = 10 << 20
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
+		var err error
+		if multipartImport {
+			err = r.ParseMultipartForm(1 << 20)
+			if r.MultipartForm != nil {
+				defer r.MultipartForm.RemoveAll()
+			}
+		} else {
+			err = r.ParseForm()
+		}
+		if err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
+			} else {
+				http.Error(w, "bad request", http.StatusBadRequest)
+			}
 			return
 		}
 		// Form field first, then the htmx header.

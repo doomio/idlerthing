@@ -139,7 +139,7 @@ func Import(ctx context.Context, db *sql.DB, r io.Reader, force bool) (*Summary,
 		}
 	}
 
-	imp := &importer{tx: conn, seenIPs: map[string]bool{}}
+	imp := &importer{tx: conn, seenIPs: map[string]bool{}, seenSeedboxes: map[string]bool{}}
 	if legacyFormat {
 		warnf(&imp.sum.Warnings, "%s", "backup predates the format marker — restoring as legacy format")
 	}
@@ -166,9 +166,10 @@ type importer struct {
 	catMisses int             // catalog refs the document couldn't resolve (partial export)
 	ipMaps    map[int64]int64 // old ip id → new ip id
 	// idMaps maps service_type → old id → new id.
-	idMaps  [7]map[int64]int64
-	catMaps map[string]map[int64]int64 // catalog kind → old id → new id
-	seenIPs map[string]bool
+	idMaps        [7]map[int64]int64
+	catMaps       map[string]map[int64]int64 // catalog kind → old id → new id
+	seenIPs       map[string]bool
+	seenSeedboxes map[string]bool
 }
 
 // run restores one decoded export document into imp.tx in dependency order:
@@ -985,6 +986,13 @@ func (imp *importer) seedboxes(ctx context.Context, doc map[string]any) error {
 		if !imp.requireName(b, "hostname", "seedbox") {
 			continue
 		}
+		hostname := sget(b, "hostname")
+		key := strings.ToLower(hostname)
+		if imp.seenSeedboxes[key] {
+			warnf(&imp.sum.Warnings, "seedbox %q: duplicate hostname skipped", hostname)
+			continue
+		}
+		imp.seenSeedboxes[key] = true
 		sshUser := sget(b, "ssh_user")
 		// Imported inventory never grants network polling consent on this instance.
 		sshEnabled := false

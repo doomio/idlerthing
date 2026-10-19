@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"idlerthing/internal/importer"
 	"idlerthing/internal/prom"
 )
 
@@ -86,6 +88,54 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, view set
 	data := s.newPageData(w, r, "Settings", "settings")
 	data.Data = view
 	s.render(w, r, "settings", data)
+}
+
+// handleSettingsImport imports an uploaded export without allowing native JSON
+// to duplicate existing inventory. The importer owns its transaction.
+func (s *Server) handleSettingsImport(w http.ResponseWriter, r *http.Request) {
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "select an import file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	format, input, err := importer.DetectFormat(file)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var message string
+	switch format {
+	case importer.FormatNative:
+		summary, importErr := importer.Import(r.Context(), s.db, input, false)
+		err = importErr
+		if err == nil {
+			message = fmt.Sprintf("Imported %d servers and %d seedboxes (%d warnings).", summary.Servers, summary.Seedboxes, len(summary.Warnings))
+		}
+	case importer.FormatMyJSON, importer.FormatMyCSV:
+		var records []importer.MyServer
+		var warnings []string
+		if format == importer.FormatMyJSON {
+			records, warnings, err = importer.ParseMyJSON(input)
+		} else {
+			records, warnings, err = importer.ParseMyCSV(input)
+		}
+		if err == nil {
+			var summary *importer.MySummary
+			summary, err = importer.ImportMyIdlers(r.Context(), s.db, records, warnings)
+			if err == nil {
+				message = fmt.Sprintf("Imported %d servers; skipped %d duplicates (%d warnings).", summary.Imported, summary.SkippedDup, len(summary.Warnings))
+			}
+		}
+	default:
+		err = fmt.Errorf("unsupported import format")
+	}
+	if err != nil {
+		http.Error(w, "import failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.setFlash(w, r, "ok", message)
+	http.Redirect(w, r, routeSettings, http.StatusSeeOther)
 }
 
 // handleSettingsUpdate handles POST /settings (general + display sections).
