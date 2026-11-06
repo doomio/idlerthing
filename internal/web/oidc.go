@@ -39,18 +39,12 @@ func (s *Server) SetOIDC(ctx context.Context, issuer, discoveryURL, clientID, cl
 	var provider *oidc.Provider
 	var err error
 	if discoveryURL != "" {
-		provider, err = oidcProvider(ctx, discoveryURL)
+		provider, err = oidcProvider(ctx, discoveryURL, issuer)
 	} else {
 		provider, err = oidc.NewProvider(ctx, issuer)
 	}
 	if err != nil {
 		return err
-	}
-	var meta struct {
-		Issuer string `json:"issuer"`
-	}
-	if err := provider.Claims(&meta); err != nil || meta.Issuer != issuer {
-		return errors.New("OIDC discovery issuer mismatch")
 	}
 	s.oidc = &oidcLogin{
 		subjects: allowed,
@@ -60,7 +54,7 @@ func (s *Server) SetOIDC(ctx context.Context, issuer, discoveryURL, clientID, cl
 	return nil
 }
 
-func oidcProvider(ctx context.Context, discoveryURL string) (*oidc.Provider, error) {
+func oidcProvider(ctx context.Context, discoveryURL, issuer string) (*oidc.Provider, error) {
 	u, err := url.Parse(discoveryURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
 		return nil, errors.New("OIDC discovery URL must be HTTPS")
@@ -84,6 +78,9 @@ func oidcProvider(ctx context.Context, discoveryURL string) (*oidc.Provider, err
 	var cfg oidc.ProviderConfig
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&cfg); err != nil {
 		return nil, err
+	}
+	if cfg.IssuerURL != issuer {
+		return nil, errors.New("OIDC discovery issuer mismatch")
 	}
 	for _, endpoint := range []string{cfg.IssuerURL, cfg.AuthURL, cfg.TokenURL, cfg.JWKSURL} {
 		u, err := url.Parse(endpoint)
