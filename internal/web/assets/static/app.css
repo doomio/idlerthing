@@ -365,6 +365,8 @@ form.htmx-request { opacity: .55; }
 }
 .auth-form { display: flex; flex-direction: column; gap: 14px; }
 .auth-submit { width: 100%; margin-top: 4px; }
+.auth-divider { margin: 16px 0 12px; text-align: center; color: var(--mut); }
+.auth-sso { display: block; text-align: center; text-decoration: none; }
 
 /* ---------- Forms ---------- */
 .field { display: flex; flex-direction: column; gap: 5px; }

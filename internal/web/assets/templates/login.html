@@ -37,7 +37,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
     {{if .Error}}
     <div class="flash flash-err">{{.Error}}</div>
     {{end}}
-    {{if .OIDC}}<p><a class="btn btn-primary auth-submit" href="/auth/oidc/start">Sign in with SSO</a></p>{{end}}
     <form method="post" action="/login" class="auth-form">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <label class="field">
@@ -50,6 +49,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       </label>
       <button class="btn btn-primary auth-submit" type="submit">Sign in</button>
     </form>
+    {{if .OIDC}}
+    <div class="auth-divider">or</div>
+    <a class="btn auth-submit auth-sso" href="/auth/oidc/start">Sign in with SSO</a>
+    {{end}}
     <p class="auth-legal">
       <a href="/license">License</a> ·
       <a href="/third-party-licenses">Third-party notices</a> ·

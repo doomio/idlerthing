@@ -8,6 +8,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-jose/go-jose/v4"
 	"golang.org/x/oauth2"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +16,27 @@ import (
 	"testing"
 	"time"
 )
+
+func TestOIDCLoginButtonAfterPasswordForm(t *testing.T) {
+	ts, _, app := newTestServerFull(t)
+	defer ts.Close()
+	app.oidc = &oidcLogin{subjects: map[string]struct{}{"owner-admin": {}}}
+	resp, err := http.Get(ts.URL + "/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(body)
+	form := strings.Index(page, "</form>")
+	button := strings.Index(page, "Sign in with SSO")
+	if form < 0 || button < form || !strings.Contains(page[form:button], "auth-divider") {
+		t.Fatal("SSO button should follow the password form with a divider")
+	}
+}
 
 func TestOIDCDisabledByDefault(t *testing.T) {
 	ts, _ := newTestServer(t)
