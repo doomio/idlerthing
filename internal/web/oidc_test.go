@@ -32,7 +32,7 @@ func TestOIDCDisabledByDefault(t *testing.T) {
 func TestOIDCUnmatchedSubjectCannotCreateSession(t *testing.T) {
 	ts, _, s := newTestServerFull(t)
 	defer ts.Close()
-	s.oidc = &oidcLogin{subject: "pinned", verify: func(_ *http.Request, code, nonce string) (string, error) { return "unmatched", nil }}
+	s.oidc = &oidcLogin{subjects: map[string]struct{}{"pinned": {}}, verify: func(_ *http.Request, code, nonce string) (string, error) { return "unmatched", nil }}
 	req := httptest.NewRequest("GET", "/auth/oidc/callback?code=valid&state=state", nil)
 	req.AddCookie(&http.Cookie{Name: "idler_oidc_state", Value: "state"})
 	req.AddCookie(&http.Cookie{Name: "idler_oidc_nonce", Value: "nonce"})
@@ -47,7 +47,7 @@ func TestOIDCUnmatchedSubjectCannotCreateSession(t *testing.T) {
 func TestOIDCStartAndCallbackGuards(t *testing.T) {
 	ts, _, app := newTestServerFull(t)
 	defer ts.Close()
-	app.oidc = &oidcLogin{subject: "pinned", verify: func(_ *http.Request, _, _ string) (string, error) { return "pinned", nil }}
+	app.oidc = &oidcLogin{subjects: map[string]struct{}{"pinned": {}}, verify: func(_ *http.Request, _, _ string) (string, error) { return "pinned", nil }}
 	client := newClient(t)
 	start, err := client.Get(ts.URL + "/auth/oidc/start")
 	if err != nil {
@@ -148,7 +148,7 @@ func TestOIDCStartIncludesNonceAndState(t *testing.T) {
 
 func TestOIDCStartAndCallbackUsesPKCE(t *testing.T) {
 	_, _, app := newTestServerFull(t)
-	app.oidc = &oidcLogin{subject: "pinned", oauth: oauth2.Config{ClientID: "client", Endpoint: oauth2.Endpoint{AuthURL: "https://auth.example/authorize"}, RedirectURL: "https://idler.example/auth/oidc/callback"}, verify: func(_ *http.Request, _, _ string) (string, error) { return "pinned", nil }}
+	app.oidc = &oidcLogin{subjects: map[string]struct{}{"pinned": {}}, oauth: oauth2.Config{ClientID: "client", Endpoint: oauth2.Endpoint{AuthURL: "https://auth.example/authorize"}, RedirectURL: "https://idler.example/auth/oidc/callback"}, verify: func(_ *http.Request, _, _ string) (string, error) { return "pinned", nil }}
 	rr := httptest.NewRecorder()
 	app.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/auth/oidc/start", nil))
 	u, err := url.Parse(rr.Header().Get("Location"))

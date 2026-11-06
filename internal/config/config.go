@@ -47,16 +47,16 @@ type Config struct {
 	// PMAPIURL overrides the PulsedMedia customer-API endpoint. Empty uses
 	// the built-in feed URL; set only to point at a test server.
 	PMAPIURL string
-	// OIDC is opt-in and binds one exact IdP subject to the existing admin.
-	OIDCIssuer, OIDCClientID, OIDCClientSecret, OIDCSubject string
+	// OIDC is opt-in and binds explicit IdP subjects to the existing admin.
+	OIDCIssuer, OIDCClientID, OIDCClientSecret, OIDCSubjects string
 }
 
 // ValidateOIDC rejects partial or unsafe OIDC configuration.
 func (c Config) ValidateOIDC() error {
-	if c.OIDCIssuer == "" && c.OIDCClientID == "" && c.OIDCClientSecret == "" && c.OIDCSubject == "" {
+	if c.OIDCIssuer == "" && c.OIDCClientID == "" && c.OIDCClientSecret == "" && c.OIDCSubjects == "" {
 		return nil
 	}
-	if c.OIDCIssuer == "" || c.OIDCClientID == "" || c.OIDCClientSecret == "" || c.OIDCSubject == "" || c.BaseURL == "" || !c.BehindTLSProxy {
+	if c.OIDCIssuer == "" || c.OIDCClientID == "" || c.OIDCClientSecret == "" || c.OIDCSubjects == "" || c.BaseURL == "" || !c.BehindTLSProxy {
 		return fmt.Errorf("OIDC requires HTTPS issuer and base URL, client ID, client secret, and pinned subject")
 	}
 	issuer, err := url.Parse(c.OIDCIssuer)
@@ -84,7 +84,7 @@ func Load() Config {
 		OIDCIssuer:       os.Getenv("IDLER_OIDC_ISSUER"),
 		OIDCClientID:     os.Getenv("IDLER_OIDC_CLIENT_ID"),
 		OIDCClientSecret: os.Getenv("IDLER_OIDC_CLIENT_SECRET"),
-		OIDCSubject:      os.Getenv("IDLER_OIDC_SUBJECT"),
+		OIDCSubjects:     os.Getenv("IDLER_OIDC_SUBJECTS"),
 	}
 }
 

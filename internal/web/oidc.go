@@ -16,21 +16,28 @@ import (
 const oidcCookieAge = 5 * time.Minute
 
 type oidcLogin struct {
-	subject  string
+	subjects map[string]struct{}
 	oauth    oauth2.Config
 	verifier *oidc.IDTokenVerifier
 	verify   func(*http.Request, string, string) (string, error)
 }
 
-// SetOIDC enables a single, pinned IdP identity for this single-admin app.
+// SetOIDC enables explicitly pinned IdP identities for this single-admin app.
 // Discovery errors fail startup rather than leaving a misleading SSO button.
-func (s *Server) SetOIDC(ctx context.Context, issuer, clientID, clientSecret, baseURL, subject string) error {
+func (s *Server) SetOIDC(ctx context.Context, issuer, clientID, clientSecret, baseURL, subjects string) error {
+	allowed := make(map[string]struct{})
+	for _, id := range strings.Split(subjects, ",") {
+		if id == "" || strings.TrimSpace(id) != id {
+			return errors.New("OIDC subjects must be nonempty and exact")
+		}
+		allowed[id] = struct{}{}
+	}
 	provider, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {
 		return err
 	}
 	s.oidc = &oidcLogin{
-		subject:  subject,
+		subjects: allowed,
 		oauth:    oauth2.Config{ClientID: clientID, ClientSecret: clientSecret, RedirectURL: strings.TrimRight(baseURL, "/") + "/auth/oidc/callback", Endpoint: provider.Endpoint(), Scopes: []string{oidc.ScopeOpenID}},
 		verifier: provider.Verifier(&oidc.Config{ClientID: clientID}),
 	}
@@ -87,7 +94,8 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	} else {
 		subject, err = s.oidc.verifyCode(r.Context(), r.URL.Query().Get("code"), nonce.Value, pkce.Value)
 	}
-	if err != nil || subject == "" || subtle.ConstantTimeCompare([]byte(subject), []byte(s.oidc.subject)) != 1 {
+	_, authorized := s.oidc.subjects[subject]
+	if err != nil || subject == "" || !authorized {
 		slog.Warn("OIDC login rejected", "reason", "identity not authorized or token verification failed")
 		http.Error(w, "OIDC identity not authorized", http.StatusForbidden)
 		return

@@ -8,12 +8,12 @@ func TestOIDCConfigRequiresExplicitIdentity(t *testing.T) {
 	t.Setenv("IDLER_OIDC_CLIENT_SECRET", "secret")
 	t.Setenv("IDLER_BASE_URL", "https://idler.example")
 	t.Setenv("IDLER_BEHIND_TLS_PROXY", "true")
-	t.Setenv("IDLER_OIDC_SUBJECT", "")
+	t.Setenv("IDLER_OIDC_SUBJECTS", "")
 	cfg := Load()
 	if err := cfg.ValidateOIDC(); err == nil {
 		t.Fatal("OIDC must not auto-link any IdP subject to the admin account")
 	}
-	t.Setenv("IDLER_OIDC_SUBJECT", "fixed-subject")
+	t.Setenv("IDLER_OIDC_SUBJECTS", "fixed-subject")
 	if err := Load().ValidateOIDC(); err != nil {
 		t.Fatal(err)
 	}

@@ -311,7 +311,7 @@ func run() error {
 	if cfg.OIDCIssuer != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := webServer.SetOIDC(ctx, cfg.OIDCIssuer, cfg.OIDCClientID, cfg.OIDCClientSecret, cfg.BaseURL, cfg.OIDCSubject); err != nil {
+		if err := webServer.SetOIDC(ctx, cfg.OIDCIssuer, cfg.OIDCClientID, cfg.OIDCClientSecret, cfg.BaseURL, cfg.OIDCSubjects); err != nil {
 			return fmt.Errorf("OIDC discovery: %w", err)
 		}
 	}
