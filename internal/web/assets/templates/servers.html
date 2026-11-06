@@ -92,6 +92,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
   </div>
 </div>
 
+<div class="server-grid-tools">
+  <span class="field-hint">Drag headers to reorder; drag edges to resize.</span>
+  <button type="button" class="btn" id="reset-server-widths">Reset widths</button>
+</div>
 <div id="server-table-wrap">
   {{template "server_table" .}}
 </div>
@@ -100,7 +104,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 {{define "server_table"}}
 {{$v := .Data}}
 {{if $v.Rows}}
-<table class="tbl">
+<table class="tbl server-grid-table" data-widths-key="idlerthing.servers.widths.{{.User.ID}}">
+  <colgroup>
+    {{range $v.GridColumns}}<col data-column="{{.Key}}" data-label="{{.Label}}" data-default-width="{{.Width}}" width="{{.Width}}">{{end}}
+    <col data-column="actions" data-default-width="120" width="120">
+  </colgroup>
   <thead>
     <tr>
       {{if $v.Col "hostname"}}<th class="{{$v.SortClass "hostname"}}"><a href="{{$v.SortLink "hostname"}}" hx-get="{{$v.SortLink "hostname"}}" hx-target="#server-table-wrap" hx-swap="innerHTML" hx-push-url="true">Hostname <span class="arrow">{{$v.SortArrow "hostname"}}</span></a></th>{{end}}
@@ -120,7 +128,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       {{if $v.Col "due"}}<th class="{{$v.SortClass "due"}}"><a href="{{$v.SortLink "due"}}" hx-get="{{$v.SortLink "due"}}" hx-target="#server-table-wrap" hx-swap="innerHTML" hx-push-url="true">Due <span class="arrow">{{$v.SortArrow "due"}}</span></a></th>{{end}}
       {{if $v.Col "since"}}<th>Since</th>{{end}}
       {{if $v.Col "uptime"}}<th>Uptime</th>{{end}}
-      <th class="col-actions"></th>
+      {{if $v.Col "active"}}<th>Active</th>{{end}}
+      {{if $v.Col "promo"}}<th>Promo</th>{{end}}
+      {{if $v.Col "public"}}<th>Public</th>{{end}}
+      {{if $v.Col "transferable"}}<th>Transferable</th>{{end}}
+      {{if $v.Col "labels"}}<th>Labels</th>{{end}}
+      {{if $v.Col "notes"}}<th>Notes</th>{{end}}
+      <th class="col-actions">Actions</th>
     </tr>
   </thead>
   <tbody>
@@ -186,6 +200,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       {{if $v.Col "uptime"}}
       <td class="mono">{{.Uptime}}</td>
       {{end}}
+      {{if $v.Col "active"}}<td>{{template "server_flag" .Active}}</td>{{end}}
+      {{if $v.Col "promo"}}<td>{{template "server_flag" .Promo}}</td>{{end}}
+      {{if $v.Col "public"}}<td>{{template "server_flag" .Public}}</td>{{end}}
+      {{if $v.Col "transferable"}}<td>{{template "server_flag" .Transferable}}</td>{{end}}
+      {{if $v.Col "labels"}}
+      <td class="server-labels">{{range .Labels}}<span class="badge">{{.Name}}</span> {{else}}—{{end}}</td>
+      {{end}}
+      {{if $v.Col "notes"}}
+      <td class="wrap server-notes">
+        {{if .Notes}}
+        <details>
+          <summary>{{.NotesPreview}}</summary>
+          {{range .Notes}}<div class="server-note">{{.}}</div>{{end}}
+        </details>
+        {{else}}—{{end}}
+      </td>
+      {{end}}
       <td class="col-actions">
         <div class="row-actions">
           <span id="ping-srv-{{.ID}}"></span>
@@ -214,3 +245,5 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 </div>
 {{end}}
 {{end}}
+
+{{define "server_flag"}}{{if .}}<span class="badge badge-ok">Yes</span>{{else}}<span class="badge badge-off">No</span>{{end}}{{end}}

@@ -115,7 +115,7 @@ func redirectBack(w http.ResponseWriter, r *http.Request, fallback string) {
 // leading slash is not enough on its own: browsers normalize "/\evil.com" to
 // the protocol-relative "//evil.com".
 func sameOriginPath(raw, fallback string) string {
-	if strings.ContainsRune(raw, '\\') {
+	if strings.ContainsRune(raw, '\\') || strings.HasPrefix(raw, "//") {
 		return fallback
 	}
 	u, err := url.Parse(raw)

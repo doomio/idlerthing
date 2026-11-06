@@ -171,11 +171,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
       This token grants full read/write access to the servers API — create, update,
       and delete. Treat it like a password and share it only with clients you trust.
     </p>
-    <form method="post" action="/settings/account"
+    <form method="post" action="/settings/account" class="form-grid"
           data-confirm="Generating a new token replaces the current one, and every client using it stops working. Continue?">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <input type="hidden" name="action" value="token">
-      <button class="btn" type="submit">Generate new token</button>
+      <label class="field">
+        <span class="field-label">Current password</span>
+        <input type="password" name="current_password" required autocomplete="current-password">
+      </label>
+      <div class="field">
+        <span class="field-label">&nbsp;</span>
+        <button class="btn" type="submit">Generate new token</button>
+      </div>
     </form>
   </section>
 

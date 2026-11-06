@@ -57,6 +57,7 @@ type Server struct {
 	limit      *rateLimiter
 	emailLimit *rateLimiter
 	blockLog   *rateLimiter // throttles the 'rate-limited' journal line
+	knownLimit *rateLimiter // budget for knownIPs sources while limit is saturated (see allowSource)
 	pingLimit  *rateLimiter
 	knownIPs   *knownIPs // sources that have authenticated before (see handleLoginPost)
 	servers    *model.ServerStore
@@ -117,18 +118,19 @@ func New(db *sql.DB) (*Server, error) {
 		limit:      newRateLimiter(10, time.Minute),
 		emailLimit: newRateLimiter(10, time.Minute),
 		// One line per source per window (see Server.logBlocked).
-		blockLog:  newRateLimiter(1, time.Minute),
-		pingLimit: newRateLimiter(10, time.Minute),
-		knownIPs:  newKnownIPs(64),
-		servers:   &model.ServerStore{DB: db},
-		catalogs:  &model.CatalogStore{DB: db},
-		pricings:  &model.PricingStore{DB: db},
-		rates:     pricing.NewRates(),
-		dash:      &dashboardCache{},
-		secret:    secret,
-		prom:      &promCache{},
-		sshPoll:   pollSeedboxLoad,
-		qbtPoll:   pollQBT,
+		blockLog:   newRateLimiter(1, time.Minute),
+		knownLimit: newRateLimiter(10, time.Minute),
+		pingLimit:  newRateLimiter(10, time.Minute),
+		knownIPs:   newKnownIPs(64),
+		servers:    &model.ServerStore{DB: db},
+		catalogs:   &model.CatalogStore{DB: db},
+		pricings:   &model.PricingStore{DB: db},
+		rates:      pricing.NewRates(),
+		dash:       &dashboardCache{},
+		secret:     secret,
+		prom:       &promCache{},
+		sshPoll:    pollSeedboxLoad,
+		qbtPoll:    pollQBT,
 	}, nil
 }
 
@@ -166,6 +168,11 @@ func (s *Server) SetBaseURL(u string) {
 	u = strings.TrimRight(u, "/")
 	if strings.Contains(u, "'") ||
 		!(strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://")) {
+		if u != "" {
+			// Silently falling back to the request Host would let a
+			// misconfiguration go unnoticed; say so once at startup.
+			slog.Warn("IDLER_BASE_URL ignored: must be an http(s) URL without quotes", "value", u)
+		}
 		u = ""
 	}
 	s.baseURL = u
