@@ -49,23 +49,31 @@ type Config struct {
 	PMAPIURL string
 	// OIDC is opt-in and binds explicit IdP subjects to the existing admin.
 	OIDCIssuer, OIDCClientID, OIDCClientSecret, OIDCSubjects string
+	// OIDCDiscoveryURL supports providers with non-standard discovery paths.
+	OIDCDiscoveryURL string
 }
 
 // ValidateOIDC rejects partial or unsafe OIDC configuration.
 func (c Config) ValidateOIDC() error {
-	if c.OIDCIssuer == "" && c.OIDCClientID == "" && c.OIDCClientSecret == "" && c.OIDCSubjects == "" {
+	if c.OIDCIssuer == "" && c.OIDCDiscoveryURL == "" && c.OIDCClientID == "" && c.OIDCClientSecret == "" && c.OIDCSubjects == "" {
 		return nil
 	}
 	if c.OIDCIssuer == "" || c.OIDCClientID == "" || c.OIDCClientSecret == "" || c.OIDCSubjects == "" || c.BaseURL == "" || !c.BehindTLSProxy {
 		return fmt.Errorf("OIDC requires HTTPS issuer and base URL, client ID, client secret, and pinned subject")
 	}
 	issuer, err := url.Parse(c.OIDCIssuer)
-	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil || issuer.Fragment != "" || issuer.RawQuery != "" {
+	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil || issuer.Fragment != "" || issuer.RawQuery != "" || issuer.Path != "/" {
 		return fmt.Errorf("OIDC issuer must be an HTTPS URL without userinfo or fragment")
 	}
 	base, err := url.Parse(c.BaseURL)
 	if err != nil || base.Scheme != "https" || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || base.Path != "" {
 		return fmt.Errorf("OIDC base URL must be an HTTPS origin")
+	}
+	if c.OIDCDiscoveryURL != "" {
+		discovery, err := url.Parse(c.OIDCDiscoveryURL)
+		if err != nil || discovery.Scheme != "https" || discovery.Host != issuer.Host || discovery.User != nil || discovery.Fragment != "" || discovery.RawQuery != "" {
+			return fmt.Errorf("OIDC discovery URL must be HTTPS and on the issuer host")
+		}
 	}
 	return nil
 }
@@ -85,6 +93,7 @@ func Load() Config {
 		OIDCClientID:     os.Getenv("IDLER_OIDC_CLIENT_ID"),
 		OIDCClientSecret: os.Getenv("IDLER_OIDC_CLIENT_SECRET"),
 		OIDCSubjects:     os.Getenv("IDLER_OIDC_SUBJECTS"),
+		OIDCDiscoveryURL: os.Getenv("IDLER_OIDC_DISCOVERY_URL"),
 	}
 }
 

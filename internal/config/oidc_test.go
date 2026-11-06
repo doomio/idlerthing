@@ -3,7 +3,7 @@ package config
 import "testing"
 
 func TestOIDCConfigRequiresExplicitIdentity(t *testing.T) {
-	t.Setenv("IDLER_OIDC_ISSUER", "https://auth.example/application/o/idler/")
+	t.Setenv("IDLER_OIDC_ISSUER", "https://auth.example/")
 	t.Setenv("IDLER_OIDC_CLIENT_ID", "idler")
 	t.Setenv("IDLER_OIDC_CLIENT_SECRET", "secret")
 	t.Setenv("IDLER_BASE_URL", "https://idler.example")
@@ -25,5 +25,10 @@ func TestOIDCConfigRequiresExplicitIdentity(t *testing.T) {
 	t.Setenv("IDLER_BEHIND_TLS_PROXY", "false")
 	if err := Load().ValidateOIDC(); err == nil {
 		t.Fatal("SSO cookies must be Secure behind TLS proxy")
+	}
+	t.Setenv("IDLER_BEHIND_TLS_PROXY", "true")
+	t.Setenv("IDLER_OIDC_DISCOVERY_URL", "https://other.example/.well-known/openid-configuration")
+	if err := Load().ValidateOIDC(); err == nil {
+		t.Fatal("discovery must stay on issuer host")
 	}
 }

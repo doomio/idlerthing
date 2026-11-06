@@ -3,9 +3,13 @@ package web
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -24,7 +28,7 @@ type oidcLogin struct {
 
 // SetOIDC enables explicitly pinned IdP identities for this single-admin app.
 // Discovery errors fail startup rather than leaving a misleading SSO button.
-func (s *Server) SetOIDC(ctx context.Context, issuer, clientID, clientSecret, baseURL, subjects string) error {
+func (s *Server) SetOIDC(ctx context.Context, issuer, discoveryURL, clientID, clientSecret, baseURL, subjects string) error {
 	allowed := make(map[string]struct{})
 	for _, id := range strings.Split(subjects, ",") {
 		if id == "" || strings.TrimSpace(id) != id {
@@ -32,9 +36,21 @@ func (s *Server) SetOIDC(ctx context.Context, issuer, clientID, clientSecret, ba
 		}
 		allowed[id] = struct{}{}
 	}
-	provider, err := oidc.NewProvider(ctx, issuer)
+	var provider *oidc.Provider
+	var err error
+	if discoveryURL != "" {
+		provider, err = oidcProvider(ctx, discoveryURL)
+	} else {
+		provider, err = oidc.NewProvider(ctx, issuer)
+	}
 	if err != nil {
 		return err
+	}
+	var meta struct {
+		Issuer string `json:"issuer"`
+	}
+	if err := provider.Claims(&meta); err != nil || meta.Issuer != issuer {
+		return errors.New("OIDC discovery issuer mismatch")
 	}
 	s.oidc = &oidcLogin{
 		subjects: allowed,
@@ -42,6 +58,40 @@ func (s *Server) SetOIDC(ctx context.Context, issuer, clientID, clientSecret, ba
 		verifier: provider.Verifier(&oidc.Config{ClientID: clientID}),
 	}
 	return nil
+}
+
+func oidcProvider(ctx context.Context, discoveryURL string) (*oidc.Provider, error) {
+	u, err := url.Parse(discoveryURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
+		return nil, errors.New("OIDC discovery URL must be HTTPS")
+	}
+	client := http.DefaultClient
+	if configured, ok := ctx.Value(oauth2.HTTPClient).(*http.Client); ok {
+		client = configured
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OIDC discovery returned HTTP %d", resp.StatusCode)
+	}
+	var cfg oidc.ProviderConfig
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&cfg); err != nil {
+		return nil, err
+	}
+	for _, endpoint := range []string{cfg.IssuerURL, cfg.AuthURL, cfg.TokenURL, cfg.JWKSURL} {
+		u, err := url.Parse(endpoint)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
+			return nil, errors.New("OIDC endpoint must be HTTPS")
+		}
+	}
+	return cfg.NewProvider(ctx), nil
 }
 
 func (s *Server) oidcCookie(w http.ResponseWriter, r *http.Request, name, value string, age int) {
