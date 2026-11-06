@@ -294,6 +294,9 @@ func run() error {
 		return fmt.Errorf("seed admin: %w", err)
 	}
 	warnDenylistedPassword(database)
+	if err := cfg.ValidateOIDC(); err != nil {
+		return err
+	}
 
 	webServer, err := web.New(database)
 	if err != nil {
@@ -305,6 +308,13 @@ func run() error {
 	webServer.SetAllowHTTPIngest(cfg.AllowHTTPIngest)
 	webServer.SetBaseURL(cfg.BaseURL)
 	webServer.SetPMAPIURL(cfg.PMAPIURL)
+	if cfg.OIDCIssuer != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := webServer.SetOIDC(ctx, cfg.OIDCIssuer, cfg.OIDCClientID, cfg.OIDCClientSecret, cfg.BaseURL, cfg.OIDCSubject); err != nil {
+			return fmt.Errorf("OIDC discovery: %w", err)
+		}
+	}
 	webServer.SetLegal(License, ThirdPartyLicenses)
 	webServer.SetVersion(version)
 

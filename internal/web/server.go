@@ -72,6 +72,7 @@ type Server struct {
 	livemon    liveMonCache
 
 	publicCache     publicCacheEntry
+	oidc            *oidcLogin
 	behindTLSProxy  bool
 	allowHTTPIngest bool           // IDLER_BEHIND_TLS_PROXY
 	baseURL         string         // IDLER_BASE_URL ("" = derive from request)
@@ -208,6 +209,8 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /login", s.handleLoginGet)
 	mux.HandleFunc("POST /login", s.handleLoginPost)
+	mux.HandleFunc("GET /auth/oidc/start", s.handleOIDCStart)
+	mux.HandleFunc("GET /auth/oidc/callback", s.handleOIDCCallback)
 
 	// Protected routes (session required, CSRF enforced on unsafe methods).
 	mux.Handle("GET /{$}", s.protect(http.HandlerFunc(s.handleDashboard)))

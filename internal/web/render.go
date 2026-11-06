@@ -52,6 +52,7 @@ type pageData struct {
 	Counts    Counts
 	Flash     *flash
 	Error     string // login page error
+	OIDC      bool
 	AssetV    string
 	AccentC   string // accent color without '#', fingerprint for accent.css
 	Compact   bool
@@ -200,6 +201,7 @@ func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, csrfToken, 
 		Theme:     s.currentTheme(r),
 		CSRFToken: csrfToken,
 		Error:     errMsg,
+		OIDC:      s.oidc != nil,
 	})
 }
 
